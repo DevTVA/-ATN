@@ -13,8 +13,15 @@ export const getUser = asyncHandler(async (req, res) => {
 });
 
 export const createUser = asyncHandler(async (req, res) => {
-  const exists = await User.findOne({ email: req.body.email });
-  if (exists) return res.status(400).json({ message: 'Email đã được sử dụng' });
+  const { email, phone } = req.body;
+  const emailExists = await User.findOne({ email });
+  if (emailExists) return res.status(400).json({ message: 'Email đã được sử dụng' });
+
+  if (phone) {
+    const phoneExists = await User.findOne({ phone });
+    if (phoneExists) return res.status(400).json({ message: 'Số điện thoại đã được sử dụng' });
+  }
+
   const user = await User.create(req.body);
   res.status(201).json(user);
 });
@@ -22,7 +29,21 @@ export const createUser = asyncHandler(async (req, res) => {
 export const updateUser = asyncHandler(async (req, res) => {
   // Don't allow password update via this route
   delete req.body.password;
-  const user = await User.findByIdAndUpdate(req.params.id, req.body, { new: true });
+
+  const { email, phone } = req.body;
+  const userId = req.params.id;
+
+  if (email) {
+    const emailExists = await User.findOne({ email, _id: { $ne: userId } });
+    if (emailExists) return res.status(400).json({ message: 'Email đã được sử dụng' });
+  }
+
+  if (phone) {
+    const phoneExists = await User.findOne({ phone, _id: { $ne: userId } });
+    if (phoneExists) return res.status(400).json({ message: 'Số điện thoại đã được sử dụng' });
+  }
+
+  const user = await User.findByIdAndUpdate(userId, req.body, { new: true });
   if (!user) return res.status(404).json({ message: 'Không tìm thấy nhân viên' });
   res.json(user);
 });

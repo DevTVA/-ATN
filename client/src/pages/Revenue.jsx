@@ -11,6 +11,7 @@ const PERIODS = [
   { value: 'day', label: 'Hôm nay' },
   { value: 'month', label: 'Tháng này' },
   { value: 'year', label: 'Năm nay' },
+  { value: 'custom', label: 'Khoảng thời gian' },
 ]
 
 const CAT_LABEL = {
@@ -23,21 +24,35 @@ export default function Revenue() {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
 
+  const [startDate, setStartDate] = useState(() => {
+    const d = new Date()
+    d.setDate(d.getDate() - 7)
+    return d.toISOString().split('T')[0]
+  })
+  const [endDate, setEndDate] = useState(() => new Date().toISOString().split('T')[0])
+
   const fetch = async () => {
     setLoading(true)
     try {
-      const { data: d } = await api.get(`/revenue?period=${period}`)
+      let url = `/revenue?period=${period}`
+      if (period === 'custom') {
+        url += `&startDate=${startDate}&endDate=${endDate}`
+      }
+      const { data: d } = await api.get(url)
       setData(d)
     } finally { setLoading(false) }
   }
 
-  useEffect(() => { fetch() }, [period])
+  useEffect(() => { fetch() }, [period, startDate, endDate])
 
   const chartData = data
-    ? (data.labels || []).map((label, i) => {
-        const found = data.chartData.find(d => parseInt(d._id) === (period === 'day' ? i : i + 1))
-        return { label, revenue: found?.revenue || 0, orders: found?.orders || 0 }
-      })
+    ? (period === 'custom'
+        ? data.chartData
+        : (data.labels || []).map((label, i) => {
+            const found = data.chartData.find(d => parseInt(d._id) === (period === 'day' ? i : i + 1))
+            return { label, revenue: found?.revenue || 0, orders: found?.orders || 0 }
+          })
+      )
     : []
 
   return (
@@ -52,19 +67,30 @@ export default function Revenue() {
         }
       />
 
-      {/* Period tabs */}
-      <div className="flex gap-2 mb-6">
-        {PERIODS.map(p => (
-          <button
-            key={p.value}
-            onClick={() => setPeriod(p.value)}
-            className={`px-4 py-2 rounded-lg text-sm font-medium border transition-all ${
-              period === p.value ? 'bg-brown-800 text-brown-100 border-brown-800' : 'bg-white text-brown-600 border-brown-200 hover:bg-brown-50'
-            }`}
-          >
-            {p.label}
-          </button>
-        ))}
+      {/* Period tabs & Custom range */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+        <div className="flex gap-2">
+          {PERIODS.map(p => (
+            <button
+              key={p.value}
+              onClick={() => setPeriod(p.value)}
+              className={`px-4 py-2 rounded-lg text-sm font-medium border transition-all ${
+                period === p.value ? 'bg-brown-800 text-brown-100 border-brown-800' : 'bg-white text-brown-600 border-brown-200 hover:bg-brown-50'
+              }`}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+
+        {period === 'custom' && (
+          <div className="flex items-center gap-2 bg-white p-2 rounded-lg border border-brown-200">
+            <span className="text-xs text-brown-500">Từ</span>
+            <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="input text-xs py-1 px-2 border-0 focus:ring-0 w-32" />
+            <span className="text-xs text-brown-500">đến</span>
+            <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="input text-xs py-1 px-2 border-0 focus:ring-0 w-32" />
+          </div>
+        )}
       </div>
 
       {loading ? (
@@ -93,7 +119,7 @@ export default function Revenue() {
             <ResponsiveContainer width="100%" height={240}>
               <BarChart data={chartData} margin={{ top: 4, right: 4, left: -10, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#F5EDE3" />
-                <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#8B5A3A' }} axisLine={false} tickLine={false} interval={period === 'month' ? 1 : 0} />
+                <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#8B5A3A' }} axisLine={false} tickLine={false} interval={period === 'month' || period === 'custom' ? 'preserveEnd' : 0} />
                 <YAxis tick={{ fontSize: 10, fill: '#8B5A3A' }} axisLine={false} tickLine={false}
                   tickFormatter={v => v >= 1000000 ? `${(v / 1000000).toFixed(1)}M` : v >= 1000 ? `${(v / 1000).toFixed(0)}K` : v} />
                 <Tooltip
@@ -111,7 +137,7 @@ export default function Revenue() {
             <ResponsiveContainer width="100%" height={180}>
               <LineChart data={chartData} margin={{ top: 4, right: 4, left: -10, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#F5EDE3" />
-                <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#8B5A3A' }} axisLine={false} tickLine={false} interval={period === 'month' ? 1 : 0} />
+                <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#8B5A3A' }} axisLine={false} tickLine={false} interval={period === 'month' || period === 'custom' ? 'preserveEnd' : 0} />
                 <YAxis tick={{ fontSize: 10, fill: '#8B5A3A' }} axisLine={false} tickLine={false} allowDecimals={false} />
                 <Tooltip
                   formatter={(v) => [v, 'Đơn hàng']}

@@ -70,13 +70,29 @@ export const createOrder = asyncHandler(async (req, res) => {
 });
 
 // PUT /api/orders/:id
+// PUT /api/orders/:id
 export const updateOrder = asyncHandler(async (req, res) => {
   const order = await Order.findById(req.params.id);
   if (!order) return res.status(404).json({ message: 'Không tìm thấy đơn hàng' });
 
   const { status, items, discount, note, paymentMethod } = req.body;
 
-  if (items) order.items = items;
+  if (items) {
+    order.items = await Promise.all(
+      items.map(async (item) => {
+        const productId = item.product || item.productId;
+        const p = await Product.findById(productId);
+        if (!p) throw new Error(`Sản phẩm ${productId} không tồn tại`);
+        return {
+          product: p._id,
+          name: p.name,
+          price: p.price,
+          quantity: item.quantity,
+          note: item.note || '',
+        };
+      })
+    );
+  }
   if (discount !== undefined) order.discount = discount;
   if (note !== undefined) order.note = note;
   if (paymentMethod) order.paymentMethod = paymentMethod;
@@ -113,7 +129,55 @@ export const updateOrder = asyncHandler(async (req, res) => {
 
 // DELETE /api/orders/:id
 export const deleteOrder = asyncHandler(async (req, res) => {
-  const order = await Order.findByIdAndDelete(req.params.id);
+  const order = await Order.findById(req.params.id);
   if (!order) return res.status(404).json({ message: 'Không tìm thấy đơn hàng' });
+
+  // Free the table if the order is not paid or cancelled
+  if (order.status !== 'paid' && order.status !== 'cancelled') {
+    await Table.findByIdAndUpdate(order.table, {
+      status: 'empty',
+      currentOrder: null,
+    });
+  }
+
+  await Order.findByIdAndDelete(req.params.id);
   res.json({ message: 'Đã xoá đơn hàng' });
+});
+
+// PUT /api/orders/:id/change-table
+export const changeTable = asyncHandler(async (req, res) => {
+  const order = await Order.findById(req.params.id);
+  if (!order) return res.status(404).json({ message: 'Không tìm thấy đơn hàng' });
+
+  if (order.status === 'paid' || order.status === 'cancelled') {
+    return res.status(400).json({ message: 'Không thể chuyển bàn cho đơn hàng đã thanh toán hoặc đã huỷ' });
+  }
+
+  const { newTableId } = req.body;
+  const newTable = await Table.findById(newTableId);
+  if (!newTable) return res.status(404).json({ message: 'Không tìm thấy bàn mới' });
+
+  if (newTable.status === 'occupied') {
+    return res.status(400).json({ message: 'Bàn mới đang có khách, không thể chuyển' });
+  }
+
+  const oldTableId = order.table;
+
+  // Update order table info
+  order.table = newTable._id;
+  order.tableNumber = newTable.number;
+  await order.save();
+
+  // Free old table
+  await Table.findByIdAndUpdate(oldTableId, {
+    status: 'empty',
+    currentOrder: null,
+  });
+
+  // Occupy new table
+  newTable.status = 'occupied';
+  newTable.currentOrder = order._id;
+  await newTable.save();
+
+  res.json({ message: 'Chuyển bàn thành công', order });
 });

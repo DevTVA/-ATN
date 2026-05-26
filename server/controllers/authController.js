@@ -24,8 +24,13 @@ export const login = asyncHandler(async (req, res) => {
 // POST /api/auth/register
 export const register = asyncHandler(async (req, res) => {
   const { name, email, password, role, phone, shift } = req.body;
-  const exists = await User.findOne({ email });
-  if (exists) return res.status(400).json({ message: 'Email đã được sử dụng' });
+  const emailExists = await User.findOne({ email });
+  if (emailExists) return res.status(400).json({ message: 'Email đã được sử dụng' });
+
+  if (phone) {
+    const phoneExists = await User.findOne({ phone });
+    if (phoneExists) return res.status(400).json({ message: 'Số điện thoại đã được sử dụng' });
+  }
 
   const user = await User.create({ name, email, password, role, phone, shift });
   res.status(201).json({ token: signToken(user._id), user });

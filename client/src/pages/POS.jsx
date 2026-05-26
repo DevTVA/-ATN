@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react'
 import api from '../api/axios'
 import toast from 'react-hot-toast'
 import { formatVND, formatDateTime } from '../utils/format'
-import { Spinner, Badge } from '../components/ui'
+import { Spinner, Badge, Modal } from '../components/ui'
 import { useAuthStore } from '../store/authStore'
 
 export default function POS() {
@@ -22,6 +22,10 @@ export default function POS() {
   
   const [searchQuery, setSearchQuery] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('all')
+
+  // Các state bổ sung
+  const [isEditingOrder, setIsEditingOrder] = useState(false)
+  const [showMoveTableModal, setShowMoveTableModal] = useState(false)
 
   const CAT_LABELS = {
     all: 'Tất cả',
@@ -63,6 +67,7 @@ export default function POS() {
     setDiscount(0)
     setCurrentOrder(null)
     setReceiptData(null)
+    setIsEditingOrder(false)
     
     if (t.status === 'occupied' && t.currentOrder) {
       try {
@@ -107,10 +112,13 @@ export default function POS() {
 
   const handleCheckout = async () => {
     if (!currentOrder) return
+    
+
+
     setSaving(true)
     try {
-      await api.put(`/orders/${currentOrder._id}`, { status: 'paid' })
-      setReceiptData({ ...currentOrder, paidAt: new Date() })
+      await api.put(`/orders/${currentOrder._id}`, { status: 'paid', paymentMethod: 'cash' })
+      setReceiptData({ ...currentOrder, paidAt: new Date(), paymentMethod: 'cash' })
       toast.success('Thanh toán thành công')
       await fetchTables()
       setSelectedTable(null)
@@ -122,6 +130,84 @@ export default function POS() {
       toast.error('Lỗi thanh toán')
     } finally { setSaving(false) }
   }
+
+  const handleStartEditOrder = () => {
+    if (!currentOrder) return
+    setIsEditingOrder(true)
+    setItems(currentOrder.items.map(item => ({
+      productId: item.product._id || item.product,
+      name: item.name,
+      price: item.price,
+      quantity: item.quantity,
+      note: item.note || ''
+    })))
+    setNote(currentOrder.note || '')
+    setDiscount(currentOrder.discount || 0)
+  }
+
+  const handleUpdateOrder = async () => {
+    if (items.length === 0) return toast.error('Vui lòng chọn món')
+    setSaving(true)
+    try {
+      await api.put(`/orders/${currentOrder._id}`, {
+        items: items.map(i => ({ productId: i.productId, quantity: i.quantity, note: i.note || '' })),
+        note,
+        discount: Number(discount)
+      })
+      toast.success('Đã cập nhật đơn hàng')
+      setIsEditingOrder(false)
+      await fetchTables()
+      // Tải lại chi tiết đơn hàng
+      const { data } = await api.get(`/orders/${currentOrder._id}`)
+      setCurrentOrder(data)
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Lỗi cập nhật đơn')
+    } finally { setSaving(false) }
+  }
+
+  const handleCancelOrder = async () => {
+    if (!currentOrder) return
+    if (!confirm(`Bạn có chắc chắn muốn hủy đơn hàng ${currentOrder.orderCode}?`)) return
+    setSaving(true)
+    try {
+      await api.put(`/orders/${currentOrder._id}`, { status: 'cancelled' })
+      toast.success('Đã hủy đơn hàng')
+      await fetchTables()
+      setSelectedTable(null)
+      setCurrentOrder(null)
+    } catch (err) {
+      toast.error('Lỗi khi hủy đơn hàng')
+    } finally { setSaving(false) }
+  }
+
+  const handleMoveTable = async (targetTableId) => {
+    if (!currentOrder) return
+    setSaving(true)
+    try {
+      await api.put(`/orders/${currentOrder._id}/change-table`, { newTableId: targetTableId })
+      toast.success('Chuyển bàn thành công')
+      setShowMoveTableModal(false)
+      
+      // Load lại tables và cập nhật state selectedTable sang bàn mới
+      const updatedTables = await api.get('/tables')
+      const sorted = updatedTables.data.sort((a, b) => {
+        if (a.number === 0) return -1
+        if (b.number === 0) return 1
+        return a.number - b.number
+      })
+      setTables(sorted)
+      
+      const newTable = sorted.find(t => t._id === targetTableId)
+      setSelectedTable(newTable)
+      
+      // Load lại order
+      const { data: orderData } = await api.get(`/orders/${currentOrder._id}`)
+      setCurrentOrder(orderData)
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Lỗi chuyển bàn')
+    } finally { setSaving(false) }
+  }
+
 
   if (loading) return <div className="flex justify-center pt-20"><Spinner /></div>
 
@@ -180,17 +266,21 @@ export default function POS() {
               <i className="ti ti-hand-click text-5xl mb-4 opacity-50" />
               <p>Chọn một bàn hoặc "Mang về"<br/>để bắt đầu đặt món</p>
             </div>
-          ) : selectedTable.status === 'empty' || selectedTable.status === 'reserved' ? (
-            // NEW ORDER FORM
+          ) : (selectedTable.status === 'empty' || selectedTable.status === 'reserved' || isEditingOrder) ? (
+            // NEW ORDER FORM & EDIT ORDER FORM
             <div className="flex flex-col h-full">
               <div className="p-4 border-b border-brown-100 bg-brown-50 flex justify-between items-center">
                 <div>
                   <div className="font-serif text-lg font-bold text-brown-900">
-                    {selectedTable.number === 0 ? 'Đơn Mang Về' : `Bàn ${selectedTable.number}`}
+                    {isEditingOrder 
+                      ? `Sửa đơn ${currentOrder?.orderCode}` 
+                      : (selectedTable.number === 0 ? 'Đơn Mang Về' : `Bàn ${selectedTable.number}`)}
                   </div>
-                  <div className="text-xs text-brown-500">Tạo đơn mới</div>
+                  <div className="text-xs text-brown-500">
+                    {isEditingOrder ? 'Chỉnh sửa đơn hàng đang phục vụ' : 'Tạo đơn mới'}
+                  </div>
                 </div>
-                <button className="text-brown-400 hover:text-brown-700" onClick={() => setSelectedTable(null)}><i className="ti ti-x" /></button>
+                <button className="text-brown-400 hover:text-brown-700" onClick={() => { setSelectedTable(null); setIsEditingOrder(false) }}><i className="ti ti-x" /></button>
               </div>
               
               <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4">
@@ -260,9 +350,20 @@ export default function POS() {
                   <span>Tổng tiền:</span>
                   <span className="text-brown-800">{formatVND(Math.max(0, total))}</span>
                 </div>
-                <button className="btn btn-primary w-full py-3 text-base justify-center" onClick={handleCreateOrder} disabled={saving || items.length === 0}>
-                  {saving ? 'Đang xử lý...' : 'Đặt món & Tạo đơn'}
-                </button>
+                {isEditingOrder ? (
+                  <div className="flex gap-2">
+                    <button className="btn w-1/3 py-3 text-base justify-center" onClick={() => setIsEditingOrder(false)}>
+                      Huỷ bỏ
+                    </button>
+                    <button className="btn btn-primary w-2/3 py-3 text-base justify-center" onClick={handleUpdateOrder} disabled={saving || items.length === 0}>
+                      {saving ? 'Đang cập nhật...' : 'Cập nhật đơn'}
+                    </button>
+                  </div>
+                ) : (
+                  <button className="btn btn-primary w-full py-3 text-base justify-center" onClick={handleCreateOrder} disabled={saving || items.length === 0}>
+                    {saving ? 'Đang xử lý...' : 'Đặt món & Tạo đơn'}
+                  </button>
+                )}
               </div>
             </div>
           ) : (
@@ -320,9 +421,24 @@ export default function POS() {
                       <span className="text-sm font-medium text-brown-600">Tổng thanh toán</span>
                       <span className="text-2xl font-bold font-serif text-brown-900">{formatVND(currentOrder.total)}</span>
                     </div>
+
                     <button className="btn w-full bg-green-600 text-white border-green-600 hover:bg-green-700 py-3 text-base justify-center" onClick={handleCheckout} disabled={saving}>
                       <i className="ti ti-check" /> {saving ? 'Đang xử lý...' : 'Thanh toán & In HĐ'}
                     </button>
+
+                    <div className="grid grid-cols-3 gap-2 mt-3">
+                      <button className="btn btn-sm text-xs justify-center" onClick={handleStartEditOrder} disabled={saving}>
+                        <i className="ti ti-edit" /> Sửa đơn
+                      </button>
+                      {selectedTable.number !== 0 && (
+                        <button className="btn btn-sm text-xs justify-center" onClick={() => setShowMoveTableModal(true)} disabled={saving}>
+                          <i className="ti ti-arrows-exchange" /> Chuyển bàn
+                        </button>
+                      )}
+                      <button className="btn btn-sm btn-danger text-xs justify-center" onClick={handleCancelOrder} disabled={saving}>
+                        <i className="ti ti-trash" /> Huỷ đơn
+                      </button>
+                    </div>
                   </div>
                 </>
               )}
@@ -330,6 +446,38 @@ export default function POS() {
           )}
         </div>
       </div>
+
+      {/* Modal Chuyển bàn */}
+      <Modal
+        open={showMoveTableModal}
+        onClose={() => setShowMoveTableModal(false)}
+        title={`Chuyển đơn từ Bàn ${selectedTable?.number} sang bàn khác`}
+        footer={
+          <button className="btn" onClick={() => setShowMoveTableModal(false)}>Đóng</button>
+        }
+      >
+        <div className="space-y-3">
+          <p className="text-sm text-brown-600">Chọn bàn trống để chuyển đơn hàng sang:</p>
+          <div className="grid grid-cols-3 gap-2">
+            {tables
+              .filter(t => t._id !== selectedTable?._id && t.number !== 0 && t.status !== 'occupied')
+              .map(t => (
+                <button
+                  key={t._id}
+                  onClick={() => handleMoveTable(t._id)}
+                  disabled={saving}
+                  className="p-3 text-center rounded-lg border-2 border-brown-200 hover:border-brown-500 bg-brown-50 hover:bg-brown-100 transition-all font-semibold text-brown-800 text-sm"
+                >
+                  Bàn {t.number}
+                </button>
+              ))}
+          </div>
+          {tables.filter(t => t._id !== selectedTable?._id && t.number !== 0 && t.status !== 'occupied').length === 0 && (
+            <p className="text-sm text-red-500 italic text-center py-2">Không có bàn nào đang trống</p>
+          )}
+        </div>
+      </Modal>
+
 
       {/* PRINT RECEIPT (Hidden on screen) */}
       <div id="print-receipt" className="hidden">
@@ -378,6 +526,17 @@ export default function POS() {
               <div className="flex justify-between font-bold text-sm mt-1">
                 <span>Tổng tiền:</span><span>{formatVND(receiptData.total)}</span>
               </div>
+            </div>
+
+            {/* QR Code thanh toán trực tiếp trên hóa đơn */}
+            <div className="flex flex-col items-center justify-center my-4 border-t border-b border-dashed border-black py-3 text-center">
+              <p className="text-[9px] mb-1.5 font-bold uppercase tracking-wider">Quét mã QR để thanh toán</p>
+              <img
+                src={`https://img.vietqr.io/image/MB-999999999999-compact2.png?amount=${receiptData.total}&addInfo=Thanh%20toan%20don%20hang%20${receiptData.orderCode.replace('#', '')}&accountName=BREW%20AND%20CO`}
+                alt="VietQR Code"
+                className="w-32 h-32 object-contain mx-auto"
+              />
+              <p className="text-[8px] mt-1 font-semibold">MB Bank - 999999999999 - BREW AND CO</p>
             </div>
 
             <div className="text-center text-[10px] italic">
