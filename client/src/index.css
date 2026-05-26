@@ -1,0 +1,77 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body { @apply bg-ds-surface text-ds-on-surface font-sans; }
+  * { @apply box-border; }
+}
+
+@layer components {
+  .btn { @apply inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border border-ds-outline-variant bg-ds-surface-container-lowest text-ds-on-surface hover:bg-ds-surface-container transition-all duration-150 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed; }
+  .btn-primary { @apply bg-ds-primary text-ds-on-primary border-ds-primary hover:bg-ds-primary-container hover:text-ds-on-primary-container; }
+  .btn-danger { @apply bg-ds-error text-ds-on-error border-ds-error hover:bg-ds-error-container hover:text-ds-on-error-container; }
+  .btn-sm { @apply px-3 py-1.5 text-xs rounded-[6px]; }
+
+  .card { @apply bg-ds-surface-container-lowest rounded-2xl border border-ds-outline-variant p-5 shadow-[0_4px_16px_rgba(75,54,33,0.04)]; }
+  .card-title { @apply text-base font-semibold font-serif text-ds-on-surface mb-4 flex items-center justify-between; }
+
+  .input { @apply w-full px-3 py-2 rounded-lg border border-ds-outline-variant text-sm bg-ds-surface-container-lowest text-ds-on-surface focus:outline-none focus:ring-2 focus:ring-ds-primary focus:border-transparent placeholder-ds-outline; }
+  .select { @apply w-full px-3 py-2 rounded-lg border border-ds-outline-variant text-sm bg-ds-surface-container-lowest text-ds-on-surface focus:outline-none focus:ring-2 focus:ring-ds-primary; }
+  .label { @apply block text-xs font-semibold tracking-wider text-ds-on-surface-variant mb-1 uppercase; }
+
+  .badge { @apply inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium; }
+  .badge-pending { @apply bg-ds-secondary-container text-ds-on-secondary-container; }
+  .badge-processing { @apply bg-ds-primary-fixed text-ds-on-primary-fixed; }
+  .badge-paid { @apply bg-ds-tertiary-container text-ds-on-tertiary-container; }
+  .badge-cancelled { @apply bg-ds-error-container text-ds-on-error-container; }
+  .badge-admin { @apply bg-ds-primary-container text-ds-on-primary-container; }
+  .badge-staff { @apply bg-ds-surface-variant text-ds-on-surface-variant; }
+  .badge-cashier { @apply bg-ds-secondary-fixed text-ds-on-secondary-fixed; }
+
+  .table-auto thead th { @apply text-xs font-semibold text-ds-on-surface-variant uppercase tracking-wider py-3 px-4 border-b border-ds-outline-variant text-left; }
+  .table-auto tbody td { @apply py-3 px-4 border-b border-ds-surface-variant text-sm text-ds-on-surface; }
+  .table-auto tbody tr:last-child td { @apply border-0; }
+  .table-auto tbody tr:hover td { @apply bg-ds-surface-container-low; }
+
+  .metric-card { @apply card flex flex-col gap-1; }
+  .metric-value { @apply text-3xl font-semibold text-ds-primary font-serif; }
+  .metric-label { @apply text-sm text-ds-on-surface-variant flex items-center gap-1.5; }
+
+  .sidebar-item { @apply flex items-center gap-3 px-4 py-3 text-sm text-ds-inverse-on-surface hover:text-white hover:bg-white/5 rounded-none cursor-pointer transition-all border-l-4 border-transparent; }
+  .sidebar-item.active { @apply text-white bg-white/10 border-l-ds-tertiary-fixed; }
+
+  .modal-overlay { @apply fixed inset-0 bg-ds-inverse-surface/60 flex items-center justify-center z-50 p-4; }
+  .modal { @apply bg-ds-surface-container-lowest rounded-2xl shadow-[0_16px_32px_rgba(75,54,33,0.12)] w-full max-w-lg max-h-[90vh] overflow-y-auto; }
+  .modal-header { @apply flex items-center justify-between p-6 border-b border-ds-outline-variant; }
+  .modal-body { @apply p-6; }
+  .modal-footer { @apply flex items-center justify-end gap-3 p-6 border-t border-ds-outline-variant; }
+
+  .form-group { @apply flex flex-col gap-1 mb-4; }
+
+  .status-empty { @apply bg-ds-tertiary-container text-ds-on-tertiary-container border-ds-tertiary-fixed-dim; }
+  .status-occupied { @apply bg-ds-error-container text-ds-on-error-container border-ds-error; }
+  .status-reserved { @apply bg-ds-secondary-container text-ds-on-secondary-container border-ds-secondary-fixed; }
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #d2c4ba; border-radius: 2px; }
+
+/* In hóa đơn */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #print-receipt, #print-receipt * {
+    visibility: visible;
+  }
+  #print-receipt {
+    display: block !important;
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+  }
+}
