@@ -9,7 +9,6 @@
     "seed": "cd server && node scripts/seed.js"
   },
   "devDependencies": {
-    "concurrently": "^8.2.2",
-    "cypress": "^15.15.0"
+    "concurrently": "^8.2.2"
   }
 }
