@@ -5,9 +5,9 @@ import { useAuthStore } from '../../store/authStore'
 const navItems = [
   { to: '/dashboard', icon: 'ti-layout-dashboard', label: 'Dashboard', adminOnly: true },
   { to: '/pos', icon: 'ti-device-desktop', label: 'Bán hàng (POS)' },
-  { to: '/products', icon: 'ti-coffee', label: 'Sản phẩm' },
-  { to: '/orders', icon: 'ti-receipt', label: 'Đơn hàng' },
-  { to: '/tables', icon: 'ti-armchair', label: 'Bàn' },
+  { to: '/products', icon: 'ti-coffee', label: 'Sản phẩm', adminOnly: true },
+  { to: '/orders', icon: 'ti-receipt', label: 'Đơn hàng', adminOnly: true },
+  { to: '/tables', icon: 'ti-armchair', label: 'Bàn', adminOnly: true },
   { to: '/users', icon: 'ti-users', label: 'Nhân viên', adminOnly: true },
   { to: '/revenue', icon: 'ti-chart-bar', label: 'Doanh thu', adminOnly: true },
 ]
@@ -35,18 +35,35 @@ export default function AppShell({ children }) {
 
         {/* Nav */}
         <nav className="flex-1 py-3 overflow-y-auto">
-          <div className="px-4 py-1 text-[10px] tracking-widest text-brown-600 uppercase mb-1">Bán hàng</div>
-          {navItems.slice(0, 2).map(item => (
-            <NavItem key={item.to} {...item} user={user} />
-          ))}
-          <div className="px-4 py-1 text-[10px] tracking-widest text-brown-600 uppercase mt-3 mb-1">Quản lý</div>
-          {navItems.slice(2, 5).map(item => (
-            <NavItem key={item.to} {...item} user={user} />
-          ))}
-          <div className="px-4 py-1 text-[10px] tracking-widest text-brown-600 uppercase mt-3 mb-1">Báo cáo</div>
-          {navItems.slice(5).map(item => (
-            <NavItem key={item.to} {...item} user={user} />
-          ))}
+          {/* Nhóm Bán hàng */}
+          {navItems.slice(0, 2).some(item => !item.adminOnly || user?.role === 'admin') && (
+            <>
+              <div className="px-4 py-1 text-[10px] tracking-widest text-brown-600 uppercase mb-1">Bán hàng</div>
+              {navItems.slice(0, 2).map(item => (
+                <NavItem key={item.to} {...item} user={user} />
+              ))}
+            </>
+          )}
+
+          {/* Nhóm Quản lý */}
+          {navItems.slice(2, 5).some(item => !item.adminOnly || user?.role === 'admin') && (
+            <>
+              <div className="px-4 py-1 text-[10px] tracking-widest text-brown-600 uppercase mt-3 mb-1">Quản lý</div>
+              {navItems.slice(2, 5).map(item => (
+                <NavItem key={item.to} {...item} user={user} />
+              ))}
+            </>
+          )}
+
+          {/* Nhóm Báo cáo */}
+          {navItems.slice(5).some(item => !item.adminOnly || user?.role === 'admin') && (
+            <>
+              <div className="px-4 py-1 text-[10px] tracking-widest text-brown-600 uppercase mt-3 mb-1">Báo cáo</div>
+              {navItems.slice(5).map(item => (
+                <NavItem key={item.to} {...item} user={user} />
+              ))}
+            </>
+          )}
         </nav>
 
         {/* User */}

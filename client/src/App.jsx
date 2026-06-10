@@ -51,9 +51,9 @@ export default function App() {
       <Route path="/" element={<PrivateRoute><RootRedirect /></PrivateRoute>} />
       <Route path="/dashboard" element={<PrivateRoute adminOnly><Dashboard /></PrivateRoute>} />
       <Route path="/pos" element={<PrivateRoute><POS /></PrivateRoute>} />
-      <Route path="/products" element={<PrivateRoute><Products /></PrivateRoute>} />
-      <Route path="/orders" element={<PrivateRoute><Orders /></PrivateRoute>} />
-      <Route path="/tables" element={<PrivateRoute><Tables /></PrivateRoute>} />
+      <Route path="/products" element={<PrivateRoute adminOnly><Products /></PrivateRoute>} />
+      <Route path="/orders" element={<PrivateRoute adminOnly><Orders /></PrivateRoute>} />
+      <Route path="/tables" element={<PrivateRoute adminOnly><Tables /></PrivateRoute>} />
       <Route path="/users" element={<PrivateRoute adminOnly><Users /></PrivateRoute>} />
       <Route path="/revenue" element={<PrivateRoute adminOnly><Revenue /></PrivateRoute>} />
       <Route path="*" element={<Navigate to="/" replace />} />

@@ -5,6 +5,12 @@ import { formatVND, formatDateTime } from '../utils/format'
 import { Spinner, Badge, Modal } from '../components/ui'
 import { useAuthStore } from '../store/authStore'
 
+const getDiscountAmount = (subTotal, type, val) => {
+  return type === 'percent'
+    ? Math.round((subTotal * Number(val || 0)) / 100)
+    : Number(val || 0)
+}
+
 export default function POS() {
   const { user } = useAuthStore()
   const [tables, setTables] = useState([])
@@ -16,7 +22,11 @@ export default function POS() {
   
   const [items, setItems] = useState([])
   const [note, setNote] = useState('')
-  const [discount, setDiscount] = useState(0)
+  
+  // State giảm giá mới
+  const [discountType, setDiscountType] = useState('percent') // 'percent' hoặc 'amount'
+  const [discountValue, setDiscountValue] = useState(0)
+  
   const [saving, setSaving] = useState(false)
   const [receiptData, setReceiptData] = useState(null)
   
@@ -26,6 +36,12 @@ export default function POS() {
   // Các state bổ sung
   const [isEditingOrder, setIsEditingOrder] = useState(false)
   const [showMoveTableModal, setShowMoveTableModal] = useState(false)
+
+  // State cho giảm giá nhanh và ghép bàn
+  const [showQuickDiscountModal, setShowQuickDiscountModal] = useState(false)
+  const [quickDiscountType, setQuickDiscountType] = useState('percent')
+  const [quickDiscountValue, setQuickDiscountValue] = useState(0)
+  const [showMergeTableModal, setShowMergeTableModal] = useState(false)
 
   const CAT_LABELS = {
     all: 'Tất cả',
@@ -64,7 +80,8 @@ export default function POS() {
     setSelectedTable(t)
     setItems([])
     setNote('')
-    setDiscount(0)
+    setDiscountType('percent')
+    setDiscountValue(0)
     setCurrentOrder(null)
     setReceiptData(null)
     setIsEditingOrder(false)
@@ -96,11 +113,12 @@ export default function POS() {
     if (items.length === 0) return toast.error('Vui lòng chọn món')
     setSaving(true)
     try {
+      const calculatedDiscount = getDiscountAmount(subtotal, discountType, discountValue)
       await api.post('/orders', {
         tableId: selectedTable._id,
         items: items.map(i => ({ productId: i.productId, quantity: i.quantity })),
         note,
-        discount: Number(discount)
+        discount: calculatedDiscount
       })
       toast.success('Đã tạo đơn hàng')
       await fetchTables()
@@ -112,9 +130,6 @@ export default function POS() {
 
   const handleCheckout = async () => {
     if (!currentOrder) return
-    
-
-
     setSaving(true)
     try {
       await api.put(`/orders/${currentOrder._id}`, { status: 'paid', paymentMethod: 'cash' })
@@ -142,17 +157,19 @@ export default function POS() {
       note: item.note || ''
     })))
     setNote(currentOrder.note || '')
-    setDiscount(currentOrder.discount || 0)
+    setDiscountType('amount')
+    setDiscountValue(currentOrder.discount || 0)
   }
 
   const handleUpdateOrder = async () => {
     if (items.length === 0) return toast.error('Vui lòng chọn món')
     setSaving(true)
     try {
+      const calculatedDiscount = getDiscountAmount(subtotal, discountType, discountValue)
       await api.put(`/orders/${currentOrder._id}`, {
         items: items.map(i => ({ productId: i.productId, quantity: i.quantity, note: i.note || '' })),
         note,
-        discount: Number(discount)
+        discount: calculatedDiscount
       })
       toast.success('Đã cập nhật đơn hàng')
       setIsEditingOrder(false)
@@ -208,11 +225,68 @@ export default function POS() {
     } finally { setSaving(false) }
   }
 
+  const handleOpenQuickDiscount = () => {
+    if (!currentOrder) return
+    setQuickDiscountType('amount')
+    setQuickDiscountValue(currentOrder.discount || 0)
+    setShowQuickDiscountModal(true)
+  }
+
+  const handleUpdateQuickDiscount = async () => {
+    if (!currentOrder) return
+    setSaving(true)
+    try {
+      const calculatedDiscount = quickDiscountType === 'percent'
+        ? Math.round((currentOrder.subtotal * Number(quickDiscountValue || 0)) / 100)
+        : Number(quickDiscountValue || 0)
+
+      await api.put(`/orders/${currentOrder._id}`, { discount: calculatedDiscount })
+      toast.success('Đã cập nhật giảm giá')
+      setShowQuickDiscountModal(false)
+      await fetchTables()
+      // Tải lại chi tiết đơn hàng
+      const { data } = await api.get(`/orders/${currentOrder._id}`)
+      setCurrentOrder(data)
+    } catch (err) {
+      toast.error('Lỗi khi cập nhật giảm giá')
+    } finally { setSaving(false) }
+  }
+
+  const handleMergeTable = async (sourceTableId) => {
+    if (!currentOrder) return
+    if (!confirm('Bạn có chắc chắn muốn ghép đơn từ bàn này vào bàn hiện tại không? Tất cả món ăn sẽ được gộp chung.')) return
+    setSaving(true)
+    try {
+      await api.put(`/orders/${currentOrder._id}/merge-table`, { sourceTableId })
+      toast.success('Ghép bàn thành công')
+      setShowMergeTableModal(false)
+      
+      // Load lại tables
+      const updatedTables = await api.get('/tables')
+      const sorted = updatedTables.data.sort((a, b) => {
+        if (a.number === 0) return -1
+        if (b.number === 0) return 1
+        return a.number - b.number
+      })
+      setTables(sorted)
+      
+      // Cập nhật selectedTable
+      const currentTable = sorted.find(t => t._id === selectedTable._id)
+      setSelectedTable(currentTable)
+      
+      // Load lại order hiện tại
+      const { data: orderData } = await api.get(`/orders/${currentOrder._id}`)
+      setCurrentOrder(orderData)
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Lỗi ghép bàn')
+    } finally { setSaving(false) }
+  }
 
   if (loading) return <div className="flex justify-center pt-20"><Spinner /></div>
 
   const subtotal = items.reduce((s, i) => s + i.price * i.quantity, 0)
-  const total = subtotal - Number(discount)
+  const discountAmount = getDiscountAmount(subtotal, discountType, discountValue)
+  const total = subtotal - discountAmount
 
   const categories = ['all', ...new Set(products.map(p => p.category))]
   const filteredProducts = products.filter(p => {
@@ -335,12 +409,63 @@ export default function POS() {
                   </div>
                 )}
                 
-                <div className="mt-auto">
-                  <div className="text-xs font-semibold text-brown-500 uppercase mb-2">Thông tin thêm</div>
-                  <input className="input text-xs py-1.5 mb-2" placeholder="Ghi chú đơn hàng..." value={note} onChange={e => setNote(e.target.value)} />
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs w-16">Giảm giá:</span>
-                    <input className="input text-xs py-1.5" type="number" placeholder="0" value={discount} onChange={e => setDiscount(e.target.value)} />
+                <div className="mt-auto space-y-2 pt-2 border-t border-brown-100">
+                  <div className="text-xs font-semibold text-brown-500 uppercase">Thông tin thêm</div>
+                  <input className="input text-xs py-1.5" placeholder="Ghi chú đơn hàng..." value={note} onChange={e => setNote(e.target.value)} />
+                  
+                  <div className="space-y-1.5">
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs font-medium text-brown-600">Giảm giá:</span>
+                      <div className="flex bg-brown-100 p-0.5 rounded-lg text-[10px]">
+                        <button
+                          type="button"
+                          onClick={() => setDiscountType('percent')}
+                          className={`px-2 py-0.5 rounded-md font-medium transition-all ${discountType === 'percent' ? 'bg-white text-brown-950 shadow-sm' : 'text-brown-500'}`}
+                        >
+                          Phần trăm (%)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDiscountType('amount')}
+                          className={`px-2 py-0.5 rounded-md font-medium transition-all ${discountType === 'amount' ? 'bg-white text-brown-950 shadow-sm' : 'text-brown-500'}`}
+                        >
+                          Số tiền (đ)
+                        </button>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        className="input text-xs py-1.5 flex-1"
+                        type="number"
+                        min="0"
+                        max={discountType === 'percent' ? 100 : undefined}
+                        placeholder={discountType === 'percent' ? 'Mức giảm % (0 - 100)' : 'Số tiền giảm...'}
+                        value={discountValue || ''}
+                        onChange={e => setDiscountValue(Math.max(0, Number(e.target.value)))}
+                      />
+                      <span className="text-xs font-bold text-brown-600 w-8 text-right">
+                        {discountType === 'percent' ? '%' : 'đ'}
+                      </span>
+                    </div>
+                    {discountType === 'percent' && (
+                      <div className="flex gap-1 overflow-x-auto pb-1">
+                        {[0, 5, 10, 15, 20, 50].map(val => (
+                          <button
+                            key={val}
+                            type="button"
+                            onClick={() => setDiscountValue(val)}
+                            className={`px-2 py-0.5 rounded border text-[10px] font-medium whitespace-nowrap transition-colors ${discountValue === val ? 'bg-brown-800 text-white border-brown-800' : 'bg-white text-brown-700 border-brown-200 hover:bg-brown-50'}`}
+                          >
+                            {val}%
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {discountAmount > 0 && (
+                      <div className="text-[10px] text-green-600 text-right font-medium">
+                        Thực tế giảm: -{formatVND(discountAmount)}
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -410,8 +535,18 @@ export default function POS() {
                       <div className="flex justify-between">
                         <span>Tạm tính</span><span>{formatVND(currentOrder.subtotal)}</span>
                       </div>
-                      <div className="flex justify-between text-green-600">
-                        <span>Giảm giá</span><span>- {formatVND(currentOrder.discount)}</span>
+                      <div className="flex justify-between text-green-600 items-center">
+                        <span>Giảm giá</span>
+                        <div className="flex items-center gap-1">
+                          <span>- {formatVND(currentOrder.discount)}</span>
+                          <button
+                            onClick={handleOpenQuickDiscount}
+                            className="p-1 text-brown-400 hover:text-brown-700 transition-colors"
+                            title="Sửa giảm giá nhanh"
+                          >
+                            <i className="ti ti-edit text-xs" />
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -426,18 +561,23 @@ export default function POS() {
                       <i className="ti ti-check" /> {saving ? 'Đang xử lý...' : 'Thanh toán & In HĐ'}
                     </button>
 
-                    <div className="grid grid-cols-3 gap-2 mt-3">
+                    <div className="grid grid-cols-2 gap-2 mt-3">
                       <button className="btn btn-sm text-xs justify-center" onClick={handleStartEditOrder} disabled={saving}>
                         <i className="ti ti-edit" /> Sửa đơn
                       </button>
-                      {selectedTable.number !== 0 && (
-                        <button className="btn btn-sm text-xs justify-center" onClick={() => setShowMoveTableModal(true)} disabled={saving}>
-                          <i className="ti ti-arrows-exchange" /> Chuyển bàn
-                        </button>
-                      )}
                       <button className="btn btn-sm btn-danger text-xs justify-center" onClick={handleCancelOrder} disabled={saving}>
                         <i className="ti ti-trash" /> Huỷ đơn
                       </button>
+                      {selectedTable.number !== 0 && (
+                        <>
+                          <button className="btn btn-sm text-xs justify-center" onClick={() => setShowMoveTableModal(true)} disabled={saving}>
+                            <i className="ti ti-arrows-exchange" /> Chuyển bàn
+                          </button>
+                          <button className="btn btn-sm text-xs justify-center bg-brown-600 text-white hover:bg-brown-700 border-brown-600 font-semibold" onClick={() => setShowMergeTableModal(true)} disabled={saving}>
+                            <i className="ti ti-git-merge" /> Ghép bàn
+                          </button>
+                        </>
+                      )}
                     </div>
                   </div>
                 </>
@@ -474,6 +614,116 @@ export default function POS() {
           </div>
           {tables.filter(t => t._id !== selectedTable?._id && t.number !== 0 && t.status !== 'occupied').length === 0 && (
             <p className="text-sm text-red-500 italic text-center py-2">Không có bàn nào đang trống</p>
+          )}
+        </div>
+      </Modal>
+
+      {/* Modal Giảm giá nhanh */}
+      <Modal
+        open={showQuickDiscountModal}
+        onClose={() => setShowQuickDiscountModal(false)}
+        title={`Chỉnh sửa giảm giá cho đơn hàng ${currentOrder?.orderCode}`}
+        footer={
+          <div className="flex gap-2 justify-end w-full">
+            <button className="btn" onClick={() => setShowQuickDiscountModal(false)} disabled={saving}>Hủy</button>
+            <button className="btn btn-primary" onClick={handleUpdateQuickDiscount} disabled={saving}>Cập nhật</button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <div className="flex justify-between items-center bg-brown-50 p-3 rounded-lg border border-brown-100 text-sm">
+            <span className="text-brown-600">Tổng tạm tính:</span>
+            <span className="font-bold text-brown-900">{formatVND(currentOrder?.subtotal || 0)}</span>
+          </div>
+          
+          <div className="space-y-1.5">
+            <div className="flex justify-between items-center">
+              <span className="text-xs font-semibold text-brown-600">Loại giảm giá:</span>
+              <div className="flex bg-brown-100 p-0.5 rounded-lg text-xs">
+                <button
+                  type="button"
+                  onClick={() => setQuickDiscountType('percent')}
+                  className={`px-3 py-1 rounded-md font-medium transition-all ${quickDiscountType === 'percent' ? 'bg-white text-brown-950 shadow-sm' : 'text-brown-500'}`}
+                >
+                  Phần trăm (%)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setQuickDiscountType('amount')}
+                  className={`px-3 py-1 rounded-md font-medium transition-all ${quickDiscountType === 'amount' ? 'bg-white text-brown-950 shadow-sm' : 'text-brown-500'}`}
+                >
+                  Số tiền (đ)
+                </button>
+              </div>
+            </div>
+            
+            <div className="flex items-center gap-2">
+              <input
+                className="input py-2 flex-1"
+                type="number"
+                min="0"
+                max={quickDiscountType === 'percent' ? 100 : undefined}
+                placeholder={quickDiscountType === 'percent' ? 'Mức giảm % (0 - 100)' : 'Số tiền giảm...'}
+                value={quickDiscountValue || ''}
+                onChange={e => setQuickDiscountValue(Math.max(0, Number(e.target.value)))}
+              />
+              <span className="font-bold text-brown-600 w-8 text-right">
+                {quickDiscountType === 'percent' ? '%' : 'đ'}
+              </span>
+            </div>
+            
+            {quickDiscountType === 'percent' && (
+              <div className="flex gap-1 overflow-x-auto pb-1">
+                {[0, 5, 10, 15, 20, 50].map(val => (
+                  <button
+                    key={val}
+                    type="button"
+                    onClick={() => setQuickDiscountValue(val)}
+                    className={`px-3 py-1 rounded border text-xs font-medium whitespace-nowrap transition-colors ${quickDiscountValue === val ? 'bg-brown-800 text-white border-brown-800' : 'bg-white text-brown-700 border-brown-200 hover:bg-brown-50'}`}
+                  >
+                    {val}%
+                  </button>
+                ))}
+              </div>
+            )}
+            
+            {quickDiscountValue > 0 && (
+              <div className="text-sm text-green-600 text-right font-medium pt-1">
+                Giảm thực tế: -{formatVND(quickDiscountType === 'percent' ? Math.round(((currentOrder?.subtotal || 0) * quickDiscountValue) / 100) : quickDiscountValue)}
+              </div>
+            )}
+          </div>
+        </div>
+      </Modal>
+
+      {/* Modal Ghép bàn */}
+      <Modal
+        open={showMergeTableModal}
+        onClose={() => setShowMergeTableModal(false)}
+        title={`Ghép bàn khác vào Bàn ${selectedTable?.number}`}
+        footer={
+          <button className="btn" onClick={() => setShowMergeTableModal(false)}>Đóng</button>
+        }
+      >
+        <div className="space-y-3">
+          <p className="text-sm text-brown-600">Chọn bàn có khách khác để gộp tất cả món ăn vào <b>Bàn {selectedTable?.number}</b>:</p>
+          <div className="grid grid-cols-3 gap-2">
+            {tables
+              .filter(t => t._id !== selectedTable?._id && t.number !== 0 && t.status === 'occupied')
+              .map(t => (
+                <button
+                  key={t._id}
+                  onClick={() => handleMergeTable(t._id)}
+                  disabled={saving}
+                  className="p-3 text-center rounded-lg border-2 border-red-200 hover:border-red-500 bg-red-50 hover:bg-red-100 transition-all font-semibold text-red-800 text-sm flex flex-col items-center justify-center gap-1"
+                >
+                  <span>Bàn {t.number}</span>
+                  <span className="text-[10px] text-red-600 opacity-80">{t.currentOrder?.total ? formatVND(t.currentOrder.total) : 'Có đơn'}</span>
+                </button>
+              ))}
+          </div>
+          {tables.filter(t => t._id !== selectedTable?._id && t.number !== 0 && t.status === 'occupied').length === 0 && (
+            <p className="text-sm text-red-500 italic text-center py-2">Không có bàn nào khác đang có khách</p>
           )}
         </div>
       </Modal>

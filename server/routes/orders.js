@@ -9,6 +9,7 @@ router.get('/:id', protect, c.getOrder);
 router.post('/', protect, c.createOrder);
 router.put('/:id', protect, c.updateOrder);
 router.put('/:id/change-table', protect, c.changeTable);
+router.put('/:id/merge-table', protect, c.mergeTable);
 router.delete('/:id', protect, adminOnly, c.deleteOrder);
 
 export default router;

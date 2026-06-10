@@ -181,3 +181,83 @@ export const changeTable = asyncHandler(async (req, res) => {
 
   res.json({ message: 'Chuyển bàn thành công', order });
 });
+
+// PUT /api/orders/:id/merge-table
+export const mergeTable = asyncHandler(async (req, res) => {
+  const targetOrder = await Order.findById(req.params.id);
+  if (!targetOrder) return res.status(404).json({ message: 'Không tìm thấy đơn hàng đích' });
+
+  if (targetOrder.status === 'paid' || targetOrder.status === 'cancelled') {
+    return res.status(400).json({ message: 'Không thể ghép bàn cho đơn hàng đã thanh toán hoặc đã huỷ' });
+  }
+
+  const { sourceTableId } = req.body;
+  const sourceTable = await Table.findById(sourceTableId);
+  if (!sourceTable) return res.status(404).json({ message: 'Không tìm thấy bàn nguồn' });
+
+  if (sourceTable.status !== 'occupied' || !sourceTable.currentOrder) {
+    return res.status(400).json({ message: 'Bàn nguồn không có khách hoặc không có đơn hàng hoạt động' });
+  }
+
+  if (sourceTable._id.toString() === targetOrder.table.toString()) {
+    return res.status(400).json({ message: 'Bàn nguồn và bàn đích không thể giống nhau' });
+  }
+
+  const sourceOrder = await Order.findById(sourceTable.currentOrder);
+  if (!sourceOrder) return res.status(404).json({ message: 'Không tìm thấy đơn hàng của bàn nguồn' });
+
+  if (sourceOrder.status !== 'pending' && sourceOrder.status !== 'processing') {
+    return res.status(400).json({ message: 'Đơn hàng của bàn nguồn đã thanh toán hoặc đã huỷ, không thể ghép' });
+  }
+
+  // Gộp items từ sourceOrder vào targetOrder
+  for (const sourceItem of sourceOrder.items) {
+    const targetItemIndex = targetOrder.items.findIndex(
+      (item) => item.product.toString() === sourceItem.product.toString()
+    );
+
+    if (targetItemIndex > -1) {
+      // Nếu đã có món, cộng dồn số lượng
+      targetOrder.items[targetItemIndex].quantity += sourceItem.quantity;
+      if (sourceItem.note) {
+        const existingNote = targetOrder.items[targetItemIndex].note;
+        targetOrder.items[targetItemIndex].note = existingNote
+          ? `${existingNote}; ${sourceItem.note}`
+          : sourceItem.note;
+      }
+    } else {
+      // Nếu chưa có, add mới
+      targetOrder.items.push({
+        product: sourceItem.product,
+        name: sourceItem.name,
+        price: sourceItem.price,
+        quantity: sourceItem.quantity,
+        note: sourceItem.note || '',
+      });
+    }
+  }
+
+  // Cộng dồn giảm giá
+  targetOrder.discount = (targetOrder.discount || 0) + (sourceOrder.discount || 0);
+
+  // Gộp ghi chú đơn hàng
+  const targetNote = targetOrder.note;
+  const sourceNote = sourceOrder.note;
+  const mergeNoteMsg = `[Ghép từ Bàn ${sourceTable.number}]${sourceNote ? `: ${sourceNote}` : ''}`;
+  targetOrder.note = targetNote ? `${targetNote}; ${mergeNoteMsg}` : mergeNoteMsg;
+
+  // Cập nhật sourceOrder thành cancelled
+  sourceOrder.status = 'cancelled';
+  sourceOrder.note = `${sourceOrder.note ? sourceOrder.note + '; ' : ''}[Đã ghép vào Bàn ${targetOrder.tableNumber}]`;
+  await sourceOrder.save();
+
+  // Giải phóng bàn nguồn
+  sourceTable.status = 'empty';
+  sourceTable.currentOrder = null;
+  await sourceTable.save();
+
+  // Lưu targetOrder (sẽ tự recalculate subtotal, total)
+  await targetOrder.save();
+
+  res.json({ message: 'Ghép bàn thành công', order: targetOrder });
+});
