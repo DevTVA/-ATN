@@ -14,6 +14,7 @@ const getDiscountAmount = (subTotal, type, val) => {
 export default function POS() {
   const { user } = useAuthStore()
   const [tables, setTables] = useState([])
+  const [takeawayOrders, setTakeawayOrders] = useState([])
   const [products, setProducts] = useState([])
   const [loading, setLoading] = useState(true)
   
@@ -37,6 +38,10 @@ export default function POS() {
   const [isEditingOrder, setIsEditingOrder] = useState(false)
   const [showMoveTableModal, setShowMoveTableModal] = useState(false)
 
+  // State cho món tự thêm ngoài menu (món custom)
+  const [showCustomProductModal, setShowCustomProductModal] = useState(false)
+  const [customProductForm, setCustomProductForm] = useState({ name: '', price: '', quantity: 1 })
+
   // State cho giảm giá nhanh và ghép bàn
   const [showQuickDiscountModal, setShowQuickDiscountModal] = useState(false)
   const [quickDiscountType, setQuickDiscountType] = useState('percent')
@@ -51,21 +56,27 @@ export default function POS() {
     'nuoc-ep': 'Nước ép'
   }
 
+  const fetchTakeawayOrders = async () => {
+    try {
+      const { data } = await api.get('/orders?type=takeaway&status=pending,processing')
+      setTakeawayOrders(data)
+    } catch (err) {
+      toast.error('Không thể lấy danh sách đơn mang về')
+    }
+  }
+
   const fetchTables = async () => {
     const { data } = await api.get('/tables')
-    // Đưa bàn "Mang về" lên đầu
-    const sorted = data.sort((a, b) => {
-      if (a.number === 0) return -1
-      if (b.number === 0) return 1
-      return a.number - b.number
-    })
-    setTables(sorted)
+    // Lọc bỏ bàn số 0 (mang về) khỏi sơ đồ bàn vật lý
+    const activeTables = data.filter(t => t.number !== 0).sort((a, b) => a.number - b.number)
+    setTables(activeTables)
   }
 
   const fetchData = async () => {
     setLoading(true)
     try {
       await fetchTables()
+      await fetchTakeawayOrders()
       const pRes = await api.get('/products?available=true')
       setProducts(pRes.data)
     } finally {
@@ -96,6 +107,35 @@ export default function POS() {
     }
   }
 
+  // Khi chọn đơn mang về từ danh sách chờ
+  const handleSelectTakeawayOrder = async (order) => {
+    setSelectedTable({ _id: 'takeaway', number: 0, name: 'Mang về' })
+    setItems([])
+    setNote('')
+    setDiscountType('percent')
+    setDiscountValue(0)
+    setReceiptData(null)
+    setIsEditingOrder(false)
+    try {
+      const { data } = await api.get(`/orders/${order._id}`)
+      setCurrentOrder(data)
+    } catch (err) {
+      setCurrentOrder(order)
+    }
+  }
+
+  // Khi tạo đơn mang về mới
+  const handleNewTakeawayOrder = () => {
+    setSelectedTable({ _id: 'takeaway', number: 0, name: 'Mang về' })
+    setItems([])
+    setNote('')
+    setDiscountType('percent')
+    setDiscountValue(0)
+    setCurrentOrder(null)
+    setReceiptData(null)
+    setIsEditingOrder(false)
+  }
+
   // Thêm món (cho bàn trống)
   const addItem = (p) => {
     setItems(prev => {
@@ -114,15 +154,27 @@ export default function POS() {
     setSaving(true)
     try {
       const calculatedDiscount = getDiscountAmount(subtotal, discountType, discountValue)
+      const isTakeaway = selectedTable._id === 'takeaway'
+      
       await api.post('/orders', {
-        tableId: selectedTable._id,
-        items: items.map(i => ({ productId: i.productId, quantity: i.quantity })),
+        type: isTakeaway ? 'takeaway' : 'dine-in',
+        tableId: isTakeaway ? undefined : selectedTable._id,
+        items: items.map(i => ({
+          productId: i.isCustom ? undefined : i.productId,
+          name: i.name,
+          price: i.price,
+          quantity: i.quantity,
+          isCustom: i.isCustom
+        })),
         note,
         discount: calculatedDiscount
       })
       toast.success('Đã tạo đơn hàng')
       await fetchTables()
-      handleSelectTable(tables.find(t => t._id === selectedTable._id)) // refresh state
+      await fetchTakeawayOrders()
+      
+      setSelectedTable(null)
+      setCurrentOrder(null)
     } catch (err) {
       toast.error(err.response?.data?.message || 'Lỗi tạo đơn')
     } finally { setSaving(false) }
@@ -132,10 +184,21 @@ export default function POS() {
     if (!currentOrder) return
     setSaving(true)
     try {
+      // Tải trước ảnh QR để tránh bị trắng khi in
+      const qrUrl = `https://img.vietqr.io/image/MB-0963664924-compact2.png?amount=${currentOrder.total}&addInfo=Thanh%20toan%20don%20hang%20${currentOrder.orderCode.replace('#', '')}&accountName=TRAN%20VAN%20ANH`
+      await new Promise((resolve) => {
+        const img = new Image()
+        img.src = qrUrl
+        img.onload = () => resolve()
+        img.onerror = () => resolve() // Tiếp tục kể cả khi lỗi mạng không tải được ảnh
+        setTimeout(resolve, 3000) // Timeout tối đa 3s
+      })
+
       await api.put(`/orders/${currentOrder._id}`, { status: 'paid', paymentMethod: 'cash' })
       setReceiptData({ ...currentOrder, paidAt: new Date(), paymentMethod: 'cash' })
       toast.success('Thanh toán thành công')
       await fetchTables()
+      await fetchTakeawayOrders()
       setSelectedTable(null)
       setCurrentOrder(null)
       
@@ -149,12 +212,13 @@ export default function POS() {
   const handleStartEditOrder = () => {
     if (!currentOrder) return
     setIsEditingOrder(true)
-    setItems(currentOrder.items.map(item => ({
-      productId: item.product._id || item.product,
+    setItems(currentOrder.items.map((item, index) => ({
+      productId: item.product?._id || item.product || `custom-${Date.now()}-${index}`,
       name: item.name,
       price: item.price,
       quantity: item.quantity,
-      note: item.note || ''
+      note: item.note || '',
+      isCustom: !item.product
     })))
     setNote(currentOrder.note || '')
     setDiscountType('amount')
@@ -167,13 +231,21 @@ export default function POS() {
     try {
       const calculatedDiscount = getDiscountAmount(subtotal, discountType, discountValue)
       await api.put(`/orders/${currentOrder._id}`, {
-        items: items.map(i => ({ productId: i.productId, quantity: i.quantity, note: i.note || '' })),
+        items: items.map(i => ({
+          productId: i.isCustom || i.productId?.startsWith('custom-') ? undefined : i.productId,
+          name: i.name,
+          price: i.price,
+          quantity: i.quantity,
+          isCustom: i.isCustom || i.productId?.startsWith('custom-'),
+          note: i.note || ''
+        })),
         note,
         discount: calculatedDiscount
       })
       toast.success('Đã cập nhật đơn hàng')
       setIsEditingOrder(false)
       await fetchTables()
+      await fetchTakeawayOrders()
       // Tải lại chi tiết đơn hàng
       const { data } = await api.get(`/orders/${currentOrder._id}`)
       setCurrentOrder(data)
@@ -190,6 +262,7 @@ export default function POS() {
       await api.put(`/orders/${currentOrder._id}`, { status: 'cancelled' })
       toast.success('Đã hủy đơn hàng')
       await fetchTables()
+      await fetchTakeawayOrders()
       setSelectedTable(null)
       setCurrentOrder(null)
     } catch (err) {
@@ -244,6 +317,7 @@ export default function POS() {
       toast.success('Đã cập nhật giảm giá')
       setShowQuickDiscountModal(false)
       await fetchTables()
+      await fetchTakeawayOrders()
       // Tải lại chi tiết đơn hàng
       const { data } = await api.get(`/orders/${currentOrder._id}`)
       setCurrentOrder(data)
@@ -282,15 +356,45 @@ export default function POS() {
     } finally { setSaving(false) }
   }
 
+  const handleAddCustomProduct = () => {
+    const { name, price, quantity } = customProductForm
+    if (!name.trim()) return toast.error('Vui lòng nhập tên món')
+    if (!price || Number(price) <= 0) return toast.error('Vui lòng nhập giá hợp lệ')
+    if (!quantity || Number(quantity) < 1) return toast.error('Vui lòng nhập số lượng hợp lệ')
+
+    const newItem = {
+      productId: `custom-${Date.now()}`,
+      name: name.trim(),
+      price: Number(price),
+      quantity: Number(quantity),
+      isCustom: true
+    }
+
+    setItems(prev => {
+      const ex = prev.find(i => i.isCustom && i.name.toLowerCase() === newItem.name.toLowerCase() && i.price === newItem.price)
+      if (ex) {
+        return prev.map(i => (i.isCustom && i.name.toLowerCase() === newItem.name.toLowerCase() && i.price === newItem.price)
+          ? { ...i, quantity: i.quantity + newItem.quantity }
+          : i)
+      }
+      return [...prev, newItem]
+    })
+
+    toast.success(`Đã thêm món "${name}" ngoài thực đơn`)
+    setShowCustomProductModal(false)
+    setCustomProductForm({ name: '', price: '', quantity: 1 })
+  }
+
   if (loading) return <div className="flex justify-center pt-20"><Spinner /></div>
 
   const subtotal = items.reduce((s, i) => s + i.price * i.quantity, 0)
   const discountAmount = getDiscountAmount(subtotal, discountType, discountValue)
   const total = subtotal - discountAmount
 
-  const categories = ['all', ...new Set(products.map(p => p.category))]
+  const categories = ['all', ...new Set(products.map(p => p.category?.slug || p.category).filter(Boolean))]
   const filteredProducts = products.filter(p => {
-    if (categoryFilter !== 'all' && p.category !== categoryFilter) return false
+    const pCatSlug = p.category?.slug || p.category
+    if (categoryFilter !== 'all' && pCatSlug !== categoryFilter) return false
     if (searchQuery && !p.name.toLowerCase().includes(searchQuery.toLowerCase())) return false
     return true
   })
@@ -298,38 +402,85 @@ export default function POS() {
   return (
     <div className="flex flex-col h-[calc(100vh-80px)] -m-6 bg-brown-50">
       <div className="flex flex-1 overflow-hidden">
-        {/* LEFT: Tables */}
-        <div className="w-2/3 p-6 overflow-y-auto border-r border-brown-200">
-          <h2 className="text-xl font-serif text-brown-900 mb-4">Sơ đồ bàn & Mang về</h2>
-          <div className="grid grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
-            {tables.map(t => (
-              <div
-                key={t._id}
-                onClick={() => handleSelectTable(t)}
-                className={`rounded-xl border-2 p-3 text-center cursor-pointer transition-all hover:shadow-md flex flex-col items-center justify-center min-h-[100px] ${
-                  selectedTable?._id === t._id ? 'ring-4 ring-brown-400 ring-opacity-50 ' : ''
-                } ${
-                  t.number === 0 ? 'bg-sky-50 border-sky-200' :
-                  t.status === 'occupied' ? 'bg-red-50 border-red-200' :
-                  t.status === 'reserved' ? 'bg-amber-50 border-amber-200' :
-                  'bg-green-50 border-green-200'
-                }`}
+        {/* LEFT: Tables & Takeaway */}
+        <div className="w-2/3 p-6 overflow-y-auto border-r border-brown-200 flex flex-col gap-6">
+          
+          {/* Takeaway Section */}
+          <div className="bg-white p-5 rounded-2xl border border-brown-100 shadow-sm">
+            <div className="flex justify-between items-center mb-4">
+              <div className="flex items-center gap-2.5">
+                <span className="text-3xl">🥡</span>
+                <div>
+                  <h3 className="font-serif text-lg font-bold text-brown-900">Bán Mang Về</h3>
+                  <p className="text-xs text-brown-500">Quản lý các đơn hàng khách mua mang đi</p>
+                </div>
+              </div>
+              <button
+                onClick={handleNewTakeawayOrder}
+                className="btn bg-sky-600 hover:bg-sky-700 text-white border-sky-600 flex items-center gap-1.5 font-semibold py-2 px-4 shadow-sm hover:shadow transition-all text-sm rounded-xl"
               >
-                {t.number === 0 ? (
-                  <div className="text-3xl mb-1">🥡</div>
-                ) : (
+                <i className="ti ti-plus text-base" /> Tạo đơn mang về mới
+              </button>
+            </div>
+
+            {takeawayOrders.length === 0 ? (
+              <div className="border border-dashed border-brown-200 rounded-xl p-6 text-center text-brown-400 text-sm">
+                Không có đơn hàng mang về nào đang chờ
+              </div>
+            ) : (
+              <div className="grid grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+                {takeawayOrders.map(order => (
+                  <div
+                    key={order._id}
+                    onClick={() => handleSelectTakeawayOrder(order)}
+                    className={`rounded-xl border-2 p-3 text-center cursor-pointer transition-all hover:shadow-md flex flex-col items-center justify-center min-h-[90px] ${
+                      currentOrder?._id === order._id ? 'ring-4 ring-sky-400 ring-opacity-40 border-sky-400 bg-sky-50' : 'bg-white border-sky-100 hover:border-sky-300'
+                    }`}
+                  >
+                    <span className="text-[10px] uppercase tracking-wider font-bold text-sky-600 mb-1">
+                      {order.status === 'pending' ? 'Chờ pha chế' : 'Đang làm'}
+                    </span>
+                    <div className="font-bold text-brown-900 text-sm font-mono">{order.orderCode}</div>
+                    <div className="text-[10px] text-brown-500 mt-1">
+                      {order.items?.length || 0} món • {new Date(order.createdAt).toLocaleTimeString('vi-VN', {hour: '2-digit', minute:'2-digit'})}
+                    </div>
+                    <div className="text-xs font-bold text-sky-700 mt-1.5">{formatVND(order.total)}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Dine-in Tables Section */}
+          <div>
+            <h2 className="text-lg font-serif font-bold text-brown-900 mb-3 flex items-center gap-2">
+              <span>☕</span> Sơ đồ bàn phục vụ
+            </h2>
+            <div className="grid grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+              {tables.map(t => (
+                <div
+                  key={t._id}
+                  onClick={() => handleSelectTable(t)}
+                  className={`rounded-xl border-2 p-3 text-center cursor-pointer transition-all hover:shadow-md flex flex-col items-center justify-center min-h-[100px] ${
+                    selectedTable?._id === t._id && selectedTable?._id !== 'takeaway' ? 'ring-4 ring-brown-400 ring-opacity-50 ' : ''
+                  } ${
+                    t.status === 'occupied' ? 'bg-red-50 border-red-200' :
+                    t.status === 'reserved' ? 'bg-amber-50 border-amber-200' :
+                    'bg-green-50 border-green-200'
+                  }`}
+                >
                   <div className="text-2xl mb-1">
                     {t.status === 'occupied' ? '🔴' : t.status === 'reserved' ? '🟡' : '🟢'}
                   </div>
-                )}
-                <div className="font-bold text-brown-900 text-sm">
-                  {t.number === 0 ? 'Mang về' : `Bàn ${t.number}`}
+                  <div className="font-bold text-brown-900 text-sm">
+                    Bàn {t.number}
+                  </div>
+                  {t.status === 'occupied' && t.currentOrder?.total && (
+                    <div className="text-[10px] font-semibold text-red-600 mt-1">{formatVND(t.currentOrder.total)}</div>
+                  )}
                 </div>
-                {t.status === 'occupied' && t.currentOrder?.total && (
-                  <div className="text-[10px] font-semibold text-red-600 mt-1">{formatVND(t.currentOrder.total)}</div>
-                )}
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
         </div>
 
@@ -338,9 +489,9 @@ export default function POS() {
           {!selectedTable ? (
             <div className="flex-1 flex flex-col items-center justify-center text-brown-400 p-6 text-center">
               <i className="ti ti-hand-click text-5xl mb-4 opacity-50" />
-              <p>Chọn một bàn hoặc "Mang về"<br/>để bắt đầu đặt món</p>
+              <p>Chọn một bàn hoặc tạo đơn "Mang về"<br/>để bắt đầu đặt món</p>
             </div>
-          ) : (selectedTable.status === 'empty' || selectedTable.status === 'reserved' || isEditingOrder) ? (
+          ) : (!currentOrder || isEditingOrder) ? (
             // NEW ORDER FORM & EDIT ORDER FORM
             <div className="flex flex-col h-full">
               <div className="p-4 border-b border-brown-100 bg-brown-50 flex justify-between items-center">
@@ -348,7 +499,7 @@ export default function POS() {
                   <div className="font-serif text-lg font-bold text-brown-900">
                     {isEditingOrder 
                       ? `Sửa đơn ${currentOrder?.orderCode}` 
-                      : (selectedTable.number === 0 ? 'Đơn Mang Về' : `Bàn ${selectedTable.number}`)}
+                      : (selectedTable._id === 'takeaway' ? 'Đơn Mang Về' : `Bàn ${selectedTable.number}`)}
                   </div>
                   <div className="text-xs text-brown-500">
                     {isEditingOrder ? 'Chỉnh sửa đơn hàng đang phục vụ' : 'Tạo đơn mới'}
@@ -360,14 +511,23 @@ export default function POS() {
               <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4">
                 {/* Search & Categories */}
                 <div className="flex flex-col gap-2">
-                  <div className="relative">
-                    <i className="ti ti-search absolute left-3 top-1/2 -translate-y-1/2 text-brown-400" />
-                    <input className="input text-sm pl-9" placeholder="Tìm tên món..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
+                  <div className="flex gap-2 items-center">
+                    <div className="relative flex-1">
+                      <i className="ti ti-search absolute left-3 top-1/2 -translate-y-1/2 text-brown-400" />
+                      <input className="input text-sm pl-9" placeholder="Tìm tên món..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowCustomProductModal(true)}
+                      className="btn bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-200 text-xs py-2 px-3 flex items-center gap-1 shrink-0 font-medium shadow-sm transition-all"
+                    >
+                      <i className="ti ti-plus text-xs" /> Món ngoài thực đơn
+                    </button>
                   </div>
                   <div className="flex gap-2 overflow-x-auto pb-1">
                     {categories.map(c => (
                       <button key={c} onClick={() => setCategoryFilter(c)} className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors ${categoryFilter === c ? 'bg-brown-800 text-brown-100' : 'bg-brown-100 text-brown-700 hover:bg-brown-200'}`}>
-                        {CAT_LABELS[c] || c}
+                        {CAT_LABELS[c] || products.find(p => (p.category?.slug || p.category) === c)?.category?.name || c}
                       </button>
                     ))}
                   </div>
@@ -497,7 +657,7 @@ export default function POS() {
               <div className="p-4 border-b border-brown-100 bg-brown-800 text-brown-50 flex justify-between items-center">
                 <div>
                   <div className="font-serif text-lg font-bold">
-                    {selectedTable.number === 0 ? 'Đơn Mang Về' : `Bàn ${selectedTable.number}`}
+                    {selectedTable._id === 'takeaway' ? 'Đơn Mang Về' : `Bàn ${selectedTable.number}`}
                   </div>
                   <div className="text-xs opacity-80">Đang phục vụ</div>
                 </div>
@@ -568,7 +728,7 @@ export default function POS() {
                       <button className="btn btn-sm btn-danger text-xs justify-center" onClick={handleCancelOrder} disabled={saving}>
                         <i className="ti ti-trash" /> Huỷ đơn
                       </button>
-                      {selectedTable.number !== 0 && (
+                      {selectedTable._id !== 'takeaway' && (
                         <>
                           <button className="btn btn-sm text-xs justify-center" onClick={() => setShowMoveTableModal(true)} disabled={saving}>
                             <i className="ti ti-arrows-exchange" /> Chuyển bàn
@@ -728,9 +888,74 @@ export default function POS() {
         </div>
       </Modal>
 
+      {/* Modal Thêm món ngoài thực đơn */}
+      <Modal
+        open={showCustomProductModal}
+        onClose={() => setShowCustomProductModal(false)}
+        title="Thêm món ngoài thực đơn"
+        footer={
+          <div className="flex gap-2 justify-end w-full">
+            <button className="btn" onClick={() => setShowCustomProductModal(false)}>Hủy</button>
+            <button className="btn btn-primary" onClick={handleAddCustomProduct}>Thêm vào đơn</button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <div>
+            <label className="label">Tên món/sản phẩm khác *</label>
+            <input
+              type="text"
+              className="input text-sm"
+              placeholder="Ví dụ: Thuốc lá Jet, Đồ khô mix..."
+              value={customProductForm.name}
+              onChange={e => setCustomProductForm(f => ({ ...f, name: e.target.value }))}
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="label">Giá bán (VNĐ) *</label>
+              <input
+                type="number"
+                min="0"
+                className="input text-sm"
+                placeholder="Ví dụ: 30000"
+                value={customProductForm.price || ''}
+                onChange={e => setCustomProductForm(f => ({ ...f, price: Math.max(0, Number(e.target.value)) }))}
+              />
+            </div>
+            <div>
+              <label className="label">Số lượng *</label>
+              <div className="flex items-center gap-2 mt-1">
+                <button
+                  type="button"
+                  onClick={() => setCustomProductForm(f => ({ ...f, quantity: Math.max(1, f.quantity - 1) }))}
+                  className="w-8 h-8 rounded bg-brown-100 border border-brown-200 flex items-center justify-center font-bold text-brown-800"
+                >
+                  −
+                </button>
+                <input
+                  type="number"
+                  min="1"
+                  className="input text-sm text-center py-1 flex-1"
+                  value={customProductForm.quantity}
+                  onChange={e => setCustomProductForm(f => ({ ...f, quantity: Math.max(1, Number(e.target.value)) }))}
+                />
+                <button
+                  type="button"
+                  onClick={() => setCustomProductForm(f => ({ ...f, quantity: f.quantity + 1 }))}
+                  className="w-8 h-8 rounded bg-brown-100 border border-brown-200 flex items-center justify-center font-bold text-brown-800"
+                >
+                  +
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </Modal>
 
-      {/* PRINT RECEIPT (Hidden on screen) */}
-      <div id="print-receipt" className="hidden">
+
+      {/* PRINT RECEIPT (Hidden on screen but preloaded by browser) */}
+      <div id="print-receipt" className="absolute left-[-9999px] top-[-9999px] opacity-0 pointer-events-none">
         {receiptData && (
           <div className="w-[80mm] mx-auto text-black font-sans text-[12px] leading-tight p-4">
             <div className="text-center mb-4">
@@ -743,7 +968,7 @@ export default function POS() {
             <div className="mb-3">
               <p>Ngày: {formatDateTime(receiptData.paidAt)}</p>
               <p>Mã đơn: <b>{receiptData.orderCode}</b></p>
-              <p>Bàn: <b>{receiptData.tableNumber === 0 ? 'Mang về' : receiptData.tableNumber}</b></p>
+              <p>Bàn: <b>{(receiptData.tableNumber === 0 || receiptData.type === 'takeaway' || !receiptData.tableNumber) ? 'Mang về' : receiptData.tableNumber}</b></p>
               <p>Thu ngân: {receiptData.staffName}</p>
             </div>
 
@@ -782,16 +1007,15 @@ export default function POS() {
             <div className="flex flex-col items-center justify-center my-4 border-t border-b border-dashed border-black py-3 text-center">
               <p className="text-[9px] mb-1.5 font-bold uppercase tracking-wider">Quét mã QR để thanh toán</p>
               <img
-                src={`https://img.vietqr.io/image/MB-999999999999-compact2.png?amount=${receiptData.total}&addInfo=Thanh%20toan%20don%20hang%20${receiptData.orderCode.replace('#', '')}&accountName=BREW%20AND%20CO`}
+                src={`https://img.vietqr.io/image/MB-0963664924-compact2.png?amount=${receiptData.total}&addInfo=Thanh%20toan%20don%20hang%20${receiptData.orderCode.replace('#', '')}&accountName=TRAN%20VAN%20ANH`}
                 alt="VietQR Code"
                 className="w-32 h-32 object-contain mx-auto"
               />
-              <p className="text-[8px] mt-1 font-semibold">MB Bank - 999999999999 - BREW AND CO</p>
+              <p className="text-[8px] mt-1 font-semibold">MB Bank - 0963664924 - Trần Văn Anh</p>
             </div>
 
             <div className="text-center text-[10px] italic">
               <p>Cảm ơn quý khách và hẹn gặp lại!</p>
-              <p>Wifi: BrewAndCo - Pass: 12345678</p>
             </div>
           </div>
         )}

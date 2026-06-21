@@ -6,8 +6,8 @@ const productSchema = new mongoose.Schema(
     description: { type: String, default: '' },
     price: { type: Number, required: true, min: 0 },
     category: {
-      type: String,
-      enum: ['cafe', 'tra-sua', 'banh-ngot', 'nuoc-ep', 'khac'],
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Category',
       required: true,
     },
     image: { type: String, default: '' },

@@ -6,7 +6,7 @@ const userSchema = new mongoose.Schema(
     name: { type: String, required: true, trim: true },
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
     password: { type: String, required: true, minlength: 6 },
-    role: { type: String, enum: ['admin', 'staff', 'cashier'], default: 'staff' },
+    role: { type: mongoose.Schema.Types.ObjectId, ref: 'Role', required: true },
     phone: { type: String, default: '' },
     shift: { type: String, default: '' },
     isActive: { type: Boolean, default: true },
@@ -27,6 +27,9 @@ userSchema.methods.matchPassword = function (plain) {
 userSchema.methods.toJSON = function () {
   const obj = this.toObject();
   delete obj.password;
+  if (obj.role && typeof obj.role === 'object' && obj.role.name) {
+    obj.role = obj.role.name;
+  }
   return obj;
 };
 

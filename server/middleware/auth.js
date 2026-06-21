@@ -9,7 +9,7 @@ const protect = async (req, res, next) => {
   try {
     const token = auth.split(' ')[1];
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = await User.findById(decoded.id).select('-password');
+    req.user = await User.findById(decoded.id).select('-password').populate('role');
     if (!req.user) return res.status(401).json({ message: 'Tài khoản không tồn tại' });
     next();
   } catch {
@@ -18,7 +18,7 @@ const protect = async (req, res, next) => {
 };
 
 const adminOnly = (req, res, next) => {
-  if (req.user?.role !== 'admin') {
+  if (req.user?.role?.name !== 'admin') {
     return res.status(403).json({ message: 'Chỉ admin mới có quyền này' });
   }
   next();

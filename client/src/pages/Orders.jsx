@@ -106,7 +106,7 @@ export default function Orders() {
                 <tr key={o._id}>
                   <td className="font-mono font-bold text-brown-800">{o.orderCode}</td>
                   <td>{o.staffName || o.staff?.name || '—'}</td>
-                  <td>Bàn {o.tableNumber}</td>
+                  <td>{o.type === 'takeaway' || !o.tableNumber ? 'Mang về' : `Bàn ${o.tableNumber}`}</td>
                   <td>{o.items?.length || 0} món</td>
                   <td className="font-semibold">{formatVND(o.total)}</td>
                   <td className="text-brown-400 text-xs">{formatDateTime(o.createdAt)}</td>
@@ -165,7 +165,7 @@ export default function Orders() {
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3 text-sm">
               <div><span className="text-brown-400">Nhân viên:</span> <span className="font-medium">{detailData.staffName || detailData.staff?.name}</span></div>
-              <div><span className="text-brown-400">Bàn:</span> <span className="font-medium">Bàn {detailData.tableNumber}</span></div>
+              <div><span className="text-brown-400">Bàn:</span> <span className="font-medium">{detailData.type === 'takeaway' || !detailData.tableNumber ? 'Mang về' : `Bàn ${detailData.tableNumber}`}</span></div>
               <div><span className="text-brown-400">Trạng thái:</span> <Badge status={detailData.status} /></div>
               <div><span className="text-brown-400">Thanh toán:</span> <span className="font-medium capitalize">{detailData.paymentMethod || 'cash'}</span></div>
             </div>

@@ -9,7 +9,7 @@ const navItems = [
   { to: '/orders', icon: 'ti-receipt', label: 'Đơn hàng', adminOnly: true },
   { to: '/tables', icon: 'ti-armchair', label: 'Bàn', adminOnly: true },
   { to: '/users', icon: 'ti-users', label: 'Nhân viên', adminOnly: true },
-  { to: '/revenue', icon: 'ti-chart-bar', label: 'Doanh thu', adminOnly: true },
+  { to: '/revenue', icon: 'ti-chart-bar', label: 'Báo cáo thống kê', adminOnly: true },
 ]
 
 export default function AppShell({ children }) {

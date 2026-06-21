@@ -1,6 +1,7 @@
 import asyncHandler from 'express-async-handler';
 import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
+import Role from '../models/Role.js';
 
 const signToken = (id) =>
   jwt.sign({ id }, process.env.JWT_SECRET, { expiresIn: '7d' });
@@ -11,7 +12,7 @@ export const login = asyncHandler(async (req, res) => {
   if (!email || !password)
     return res.status(400).json({ message: 'Vui lòng nhập email và mật khẩu' });
 
-  const user = await User.findOne({ email });
+  const user = await User.findOne({ email }).populate('role');
   if (!user || !(await user.matchPassword(password)))
     return res.status(401).json({ message: 'Email hoặc mật khẩu không đúng' });
 
@@ -32,8 +33,14 @@ export const register = asyncHandler(async (req, res) => {
     if (phoneExists) return res.status(400).json({ message: 'Số điện thoại đã được sử dụng' });
   }
 
-  const user = await User.create({ name, email, password, role, phone, shift });
-  res.status(201).json({ token: signToken(user._id), user });
+  // Ánh xạ role string sang Role ObjectId
+  const roleName = typeof role === 'string' ? role : 'staff';
+  const roleObj = await Role.findOne({ name: roleName });
+  if (!roleObj) return res.status(400).json({ message: 'Vai trò không hợp lệ' });
+
+  const user = await User.create({ name, email, password, role: roleObj._id, phone, shift });
+  const populatedUser = await user.populate('role');
+  res.status(201).json({ token: signToken(populatedUser._id), user: populatedUser });
 });
 
 // GET /api/auth/me
