@@ -21,6 +21,23 @@ export const getUser = asyncHandler(async (req, res) => {
 
 export const createUser = asyncHandler(async (req, res) => {
   const { email, phone, role } = req.body;
+
+  // Validate Email
+  if (!email || !email.trim().toLowerCase().endsWith('@cafe.com')) {
+    return res.status(400).json({ message: 'Email phải có đuôi là @cafe.com' });
+  }
+
+  // Validate Phone
+  if (phone) {
+    const isDigitsOnly = /^[0-9]+$/.test(phone);
+    if (!isDigitsOnly) {
+      return res.status(400).json({ message: 'Số điện thoại chỉ được chứa các chữ số, không chứa chữ cái hay ký tự đặc biệt' });
+    }
+    if (phone.length > 12) {
+      return res.status(400).json({ message: 'Số điện thoại không được vượt quá 12 số' });
+    }
+  }
+
   const emailExists = await User.findOne({ email });
   if (emailExists) return res.status(400).json({ message: 'Email đã được sử dụng' });
 
@@ -48,6 +65,22 @@ export const updateUser = asyncHandler(async (req, res) => {
 
   const { email, phone, role } = req.body;
   const userId = req.params.id;
+
+  // Validate Email
+  if (email && !email.trim().toLowerCase().endsWith('@cafe.com')) {
+    return res.status(400).json({ message: 'Email phải có đuôi là @cafe.com' });
+  }
+
+  // Validate Phone
+  if (phone) {
+    const isDigitsOnly = /^[0-9]+$/.test(phone);
+    if (!isDigitsOnly) {
+      return res.status(400).json({ message: 'Số điện thoại chỉ được chứa các chữ số, không chứa chữ cái hay ký tự đặc biệt' });
+    }
+    if (phone.length > 12) {
+      return res.status(400).json({ message: 'Số điện thoại không được vượt quá 12 số' });
+    }
+  }
 
   if (email) {
     const emailExists = await User.findOne({ email, _id: { $ne: userId } });

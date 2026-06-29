@@ -36,6 +36,23 @@ export default function Users() {
   const handleSave = async () => {
     if (!form.name || !form.email) return toast.error('Vui lòng điền đầy đủ thông tin')
     if (!editing && !form.password) return toast.error('Vui lòng nhập mật khẩu')
+
+    // Validate email đuôi @cafe.com
+    if (!form.email.trim().toLowerCase().endsWith('@cafe.com')) {
+      return toast.error('Email phải có đuôi là @cafe.com')
+    }
+
+    // Validate số điện thoại (không quá 12 số, không có chữ và kí tự đặc biệt)
+    if (form.phone) {
+      const isDigitsOnly = /^[0-9]+$/.test(form.phone);
+      if (!isDigitsOnly) {
+        return toast.error('Số điện thoại chỉ được chứa các chữ số')
+      }
+      if (form.phone.length > 12) {
+        return toast.error('Số điện thoại không được vượt quá 12 số')
+      }
+    }
+
     setSaving(true)
     try {
       const payload = { ...form }
