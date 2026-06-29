@@ -81,7 +81,7 @@ export default function AiChatbot() {
   const [messages, setMessages] = useState([
     {
       sender: 'ai',
-      text: 'Xin chào! Tôi là **AI Trợ Lý Thông Minh** của Tí ☕\n\nTôi có thể giúp bạn tra cứu báo cáo doanh thu, sản phẩm bán chạy hoặc kiểm tra tình trạng bàn bằng tiếng Việt. Hãy hỏi tôi bất cứ điều gì nhé!'
+      text: 'Xin chào! Tôi là **Quậy** - Trợ Lý Thông Minh của quán Tí ☕\n\nTôi có thể giúp bạn tra cứu báo cáo doanh thu, sản phẩm bán chạy hoặc kiểm tra tình trạng bàn bằng tiếng Việt. Hãy hỏi tôi bất cứ điều gì nhé!'
     }
   ]);
   const [input, setInput] = useState('');
@@ -153,7 +153,7 @@ export default function AiChatbot() {
             <div className="flex items-center gap-2">
               <span className="text-xl">🤖</span>
               <div>
-                <div className="font-serif font-bold text-sm leading-none">Tí AI</div>
+                <div className="font-serif font-bold text-sm leading-none">Quậy</div>
                 <div className="text-[10px] text-green-400 font-bold mt-1 flex items-center gap-1">
                   <span className="h-1.5 w-1.5 rounded-full bg-green-400 inline-block animate-pulse"></span>
                   Trợ lý báo cáo thông minh
