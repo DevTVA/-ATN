@@ -13,10 +13,11 @@ import Users from './pages/Users'
 import Revenue from './pages/Revenue'
 import POS from './pages/POS'
 
-function PrivateRoute({ children, adminOnly = false }) {
+function PrivateRoute({ children, adminOnly = false, allowedRoles = [] }) {
   const { user, token } = useAuthStore()
   if (!token) return <Navigate to="/login" replace />
   if (adminOnly && user && user.role !== 'admin') return <Navigate to="/" replace />
+  if (allowedRoles.length > 0 && user && !allowedRoles.includes(user.role)) return <Navigate to="/" replace />
   return <AppShell>{children}</AppShell>
 }
 
@@ -52,8 +53,8 @@ export default function App() {
       <Route path="/dashboard" element={<PrivateRoute adminOnly><Dashboard /></PrivateRoute>} />
       <Route path="/pos" element={<PrivateRoute><POS /></PrivateRoute>} />
       <Route path="/products" element={<PrivateRoute adminOnly><Products /></PrivateRoute>} />
-      <Route path="/orders" element={<PrivateRoute><Orders /></PrivateRoute>} />
-      <Route path="/tables" element={<PrivateRoute><Tables /></PrivateRoute>} />
+      <Route path="/orders" element={<PrivateRoute allowedRoles={['admin', 'cashier']}><Orders /></PrivateRoute>} />
+      <Route path="/tables" element={<PrivateRoute allowedRoles={['admin', 'cashier']}><Tables /></PrivateRoute>} />
       <Route path="/users" element={<PrivateRoute adminOnly><Users /></PrivateRoute>} />
       <Route path="/revenue" element={<PrivateRoute adminOnly><Revenue /></PrivateRoute>} />
       <Route path="*" element={<Navigate to="/" replace />} />
