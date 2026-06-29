@@ -10,6 +10,7 @@ import orderRoutes from './routes/orders.js';
 import tableRoutes from './routes/tables.js';
 import userRoutes from './routes/users.js';
 import revenueRoutes from './routes/revenue.js';
+import aiRoutes from './routes/ai.js';
 
 const app = express();
 
@@ -25,6 +26,7 @@ app.use('/api/orders', orderRoutes);
 app.use('/api/tables', tableRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/revenue', revenueRoutes);
+app.use('/api/ai', aiRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => res.json({ status: 'OK', time: new Date() }));

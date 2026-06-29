@@ -1,6 +1,7 @@
 import React from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../../store/authStore'
+import AiChatbot from '../ui/AiChatbot'
 
 const navItems = [
   { to: '/dashboard', icon: 'ti-layout-dashboard', label: 'Dashboard', adminOnly: true },
@@ -85,6 +86,7 @@ export default function AppShell({ children }) {
       <main className="flex-1 overflow-y-auto bg-brown-50">
         <div className="max-w-7xl mx-auto p-6">{children}</div>
       </main>
+      <AiChatbot />
     </div>
   )
 }
