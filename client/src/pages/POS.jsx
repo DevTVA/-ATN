@@ -17,8 +17,10 @@ export default function POS() {
   const [takeawayOrders, setTakeawayOrders] = useState([])
   const [products, setProducts] = useState([])
   const [loading, setLoading] = useState(true)
+  const [leftTab, setLeftTab] = useState('all') // 'all', 'takeaway', 'empty', 'occupied'
+  const [leftSearchQuery, setLeftSearchQuery] = useState('')
   
-  const [selectedTable, setSelectedTable] = useState(null)
+  const [selectedTable, setSelectedTable] = useState({ _id: 'takeaway', number: 0, name: 'Mang về' })
   const [currentOrder, setCurrentOrder] = useState(null)
   
   const [items, setItems] = useState([])
@@ -48,17 +50,25 @@ export default function POS() {
   const [quickDiscountValue, setQuickDiscountValue] = useState(0)
   const [showMergeTableModal, setShowMergeTableModal] = useState(false)
 
+  // State cho QR Code Modal
+  const [showPrintModal, setShowPrintModal] = useState(false)
+
+
   const CAT_LABELS = {
     all: 'Tất cả',
-    cafe: 'Cà phê',
+    'nuoc-ep': 'Nước ép',
     'tra-sua': 'Trà sữa',
+    'tra-hoa-qua': 'Trà hoa quả',
+    'do-da-xay': 'Đồ đá xay',
+    'cafe': 'Cà phê',
+    'sinh-to': 'Sinh tố',
     'banh-ngot': 'Bánh ngọt',
-    'nuoc-ep': 'Nước ép'
+    'khac': 'Đồ khác...'
   }
 
   const fetchTakeawayOrders = async () => {
     try {
-      const { data } = await api.get('/orders?type=takeaway&status=pending,processing')
+      const { data } = await api.get('/orders?type=takeaway&status=processing')
       setTakeawayOrders(data)
     } catch (err) {
       toast.error('Không thể lấy danh sách đơn mang về')
@@ -84,20 +94,187 @@ export default function POS() {
     }
   }
 
-  useEffect(() => { fetchData() }, [])
+  const [notifiedOrders, setNotifiedOrders] = useState(new Set())
+  const [isFirstPoll, setIsFirstPoll] = useState(true)
 
-  // Khi chọn bàn
-  const handleSelectTable = async (t) => {
-    setSelectedTable(t)
+  const resetCartAndSetTakeaway = () => {
     setItems([])
     setNote('')
     setDiscountType('percent')
     setDiscountValue(0)
+    setSelectedTable({ _id: 'takeaway', number: 0, name: 'Mang về' })
+    setCurrentOrder(null)
+    setIsEditingOrder(false)
+  }
+
+  useEffect(() => {
+    fetchData()
+    resetCartAndSetTakeaway()
+  }, [])
+
+  // useEffect để gán document.title phục vụ đặt tên file PDF tự động khi in
+  useEffect(() => {
+    if (showPrintModal && receiptData) {
+      const originalTitle = document.title;
+      const billCode = receiptData.orderCode.replace('#', '');
+      document.title = `HoaDon_${billCode}`;
+      return () => {
+        document.title = originalTitle;
+      };
+    }
+  }, [showPrintModal, receiptData]);
+
+  // useEffect chạy ngầm kiểm tra các đơn hàng thanh toán QR thành công từ Webhook SePay
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      try {
+        // Thêm _t để chống cache 304 Not Modified của trình duyệt
+        const { data } = await api.get(`/orders?status=paid&sort=updatedAt&limit=10&_t=${Date.now()}`);
+        if (data && data.length > 0) {
+          let hasNewQrPaid = false;
+          let matchedOrder = null;
+
+          setNotifiedOrders(prev => {
+            const newSet = new Set(prev);
+            for (const order of data) {
+              if (!newSet.has(order._id)) {
+                newSet.add(order._id);
+                if (!isFirstPoll) {
+                  const paymentMethod = order.payment?.paymentMethod || order.paymentMethod;
+                  if (paymentMethod === 'QR_CODE') {
+                    hasNewQrPaid = true;
+                    matchedOrder = order;
+                    const nameText = order.type === 'dine-in' ? `Bàn ${order.tableNumber}` : 'Đơn mang về';
+                    toast.success(
+                      <div className="font-sans text-center">
+                        <p className="font-extrabold text-emerald-800 text-lg uppercase tracking-wide">💰 Thanh toán QR thành công 💰</p>
+                        <p className="font-bold text-emerald-700 text-2xl my-2">{nameText}</p>
+                        <p className="text-sm font-semibold text-emerald-600">Đơn hàng: {order.orderCode} • Tổng tiền: {formatVND(order.total)}</p>
+                      </div>,
+                      { 
+                        duration: 10000, 
+                        position: 'top-center',
+                        style: {
+                          border: '3px solid #10B981',
+                          padding: '24px',
+                          color: '#065F46',
+                          background: '#ECFDF5',
+                          minWidth: '420px',
+                          boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.4)',
+                          borderRadius: '16px',
+                        }
+                      }
+                    );
+                    playSuccessSound();
+                  }
+                }
+              }
+            }
+            return newSet;
+          });
+
+          if (hasNewQrPaid) {
+            fetchTables();
+            fetchTakeawayOrders();
+            if (currentOrder && matchedOrder && currentOrder._id === matchedOrder._id) {
+              // Cập nhật trạng thái hiển thị của đơn hàng hiện tại thành paid và gán paymentMethod là QR_CODE
+              setCurrentOrder(prev => ({
+                ...prev,
+                status: 'paid',
+                paymentMethod: 'QR_CODE',
+                payment: matchedOrder.payment || { paymentMethod: 'QR_CODE', paidAt: new Date() }
+              }));
+            }
+          }
+          if (isFirstPoll) setIsFirstPoll(false);
+        }
+      } catch (err) {
+        console.error("Lỗi polling kiểm tra đơn PAID ngầm:", err);
+      }
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [isFirstPoll, currentOrder]);
+
+  // useEffect chuyên biệt để gọi API kiểm tra trạng thái thanh toán của riêng đơn hàng đang mở ở POS
+  useEffect(() => {
+    if (!currentOrder || currentOrder.status === 'paid' || currentOrder.status === 'cancelled') return;
+
+    const interval = setInterval(async () => {
+      try {
+        const { data } = await api.get(`/orders/${currentOrder._id}?_t=${Date.now()}`);
+        if (data && data.status === 'paid') {
+          const paymentMethod = data.payment?.paymentMethod || data.paymentMethod;
+          if (paymentMethod === 'QR_CODE') {
+            const nameText = data.type === 'dine-in' ? `Bàn ${data.tableNumber}` : 'Đơn mang về';
+            toast.success(
+              <div className="font-sans text-center">
+                <p className="font-extrabold text-emerald-800 text-lg uppercase tracking-wide">💰 Thanh toán QR thành công 💰</p>
+                <p className="font-bold text-emerald-700 text-2xl my-2">{nameText}</p>
+                <p className="text-sm font-semibold text-emerald-600">Đơn hàng: {data.orderCode} • Tổng tiền: {formatVND(data.total)}</p>
+              </div>,
+              { 
+                duration: 10000, 
+                position: 'top-center',
+                style: {
+                  border: '3px solid #10B981',
+                  padding: '24px',
+                  color: '#065F46',
+                  background: '#ECFDF5',
+                  minWidth: '420px',
+                  boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.4)',
+                  borderRadius: '16px',
+                }
+              }
+            );
+            playSuccessSound();
+            
+            // Cập nhật trạng thái hiển thị của đơn hàng hiện tại thành paid và gán payment
+            setCurrentOrder(prev => {
+              if (!prev || prev._id !== data._id) return prev;
+              return {
+                ...prev,
+                status: 'paid',
+                paymentMethod: 'QR_CODE',
+                payment: data.payment || { paymentMethod: 'QR_CODE', paidAt: new Date() }
+              };
+            });
+            
+            fetchTables();
+            fetchTakeawayOrders();
+          }
+        }
+      } catch (err) {
+        console.error("Lỗi gọi API kiểm tra trạng thái webhook cho đơn hiện tại:", err);
+      }
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [currentOrder?._id, currentOrder?.status]);
+
+  // Tự động hoàn tất giao dịch nếu đơn hàng hiện tại được thanh toán QR thành công từ xa (SePay webhook)
+  useEffect(() => {
+    if (currentOrder && currentOrder.status === 'paid') {
+      const isQr = currentOrder.payment?.paymentMethod === 'QR_CODE' || currentOrder.paymentMethod === 'QR_CODE';
+      if (isQr) {
+        handleFinishTransaction();
+        handleDirectPrint(currentOrder);
+      }
+    }
+  }, [currentOrder?.status, currentOrder?.payment?.paymentMethod, currentOrder?.paymentMethod]);
+
+  // Khi chọn bàn
+  const handleSelectTable = async (t) => {
+    setSelectedTable(t)
     setCurrentOrder(null)
     setReceiptData(null)
     setIsEditingOrder(false)
     
     if (t.status === 'occupied' && t.currentOrder) {
+      setItems([])
+      setNote('')
+      setDiscountType('percent')
+      setDiscountValue(0)
       try {
         const { data } = await api.get(`/orders/${t.currentOrder._id || t.currentOrder}`)
         setCurrentOrder(data)
@@ -127,13 +304,137 @@ export default function POS() {
   // Khi tạo đơn mang về mới
   const handleNewTakeawayOrder = () => {
     setSelectedTable({ _id: 'takeaway', number: 0, name: 'Mang về' })
-    setItems([])
-    setNote('')
-    setDiscountType('percent')
-    setDiscountValue(0)
     setCurrentOrder(null)
     setReceiptData(null)
     setIsEditingOrder(false)
+  }
+
+
+
+  // Chuyển bàn hiện tại thành đơn mang về
+  const handleConvertToTakeaway = async () => {
+    if (!currentOrder) return
+    if (!confirm('Bạn có chắc muốn chuyển đơn này thành mang về? Bàn hiện tại sẽ được giải phóng.')) return
+    setSaving(true)
+    try {
+      const { data } = await api.put(`/orders/${currentOrder._id}/change-table`, { toTakeaway: true })
+      toast.success('Đã chuyển thành đơn mang về')
+      await fetchTables()
+      await fetchTakeawayOrders()
+      setSelectedTable({ _id: 'takeaway', number: 0, name: 'Mang về' })
+      setCurrentOrder(data.order || data)
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Lỗi chuyển sang mang về')
+    } finally { setSaving(false) }
+  }
+
+  // Âm thanh báo thanh toán thành công
+  const playSuccessSound = () => {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(587.33, ctx.currentTime); // D5
+      osc.frequency.setValueAtTime(880, ctx.currentTime + 0.08); // A5
+      gain.gain.setValueAtTime(0.08, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.4);
+    } catch (e) {
+      console.log('Audio Context Error:', e);
+    }
+  }
+
+  const handleFinishTransaction = async () => {
+    await fetchTables()
+    await fetchTakeawayOrders()
+    resetCartAndSetTakeaway()
+  }
+
+  // In hóa đơn trực tiếp không qua modal trung gian
+  const handleDirectPrint = (order) => {
+    if (!order) return;
+    const originalTitle = document.title;
+    const billCode = order.orderCode.replace('#', '');
+    document.title = `HoaDon_${billCode}`;
+
+    setReceiptData({ ...order, paidAt: order.payment?.paidAt || order.paidAt || new Date() });
+    setTimeout(() => {
+      printReceipt(order);
+      // Khôi phục lại tiêu đề gốc sau 1 giây (đủ để trình duyệt gợi ý tên file PDF)
+      setTimeout(() => {
+        document.title = originalTitle;
+      }, 1000);
+    }, 150);
+  }
+
+  // In hóa đơn trực tiếp từ DOM chính - chờ ảnh QR tải xong
+  const printReceipt = (order) => {
+    // Tìm ảnh QR trong khu vực #print-receipt của DOM
+    const printDiv = document.getElementById('print-receipt');
+    if (!printDiv) {
+      // Nếu không tìm thấy div in, thử in bằng window.print() ngay
+      window.print();
+      return;
+    }
+
+    const img = printDiv.querySelector('img');
+
+    const triggerPrint = () => {
+      // Đợi thêm một nhịp render ngắn rồi mới gọi in
+      setTimeout(() => {
+        window.print();
+      }, 300);
+    };
+
+    if (img && order.status !== 'paid') {
+      // Đơn chưa thanh toán và có ảnh QR, ta phải chờ ảnh load xong
+      if (img.complete) {
+        triggerPrint();
+      } else {
+        img.onload = () => {
+          triggerPrint();
+        };
+        img.onerror = () => {
+          // Lỗi load ảnh cũng phải in
+          triggerPrint();
+        };
+        // Phòng hờ ảnh load quá lâu, sau 3.5s tự động in
+        setTimeout(triggerPrint, 3500);
+      }
+    } else {
+      // Đơn đã thanh toán (không có QR), in ngay
+      triggerPrint();
+    }
+  }
+
+  // Xác nhận thanh toán trực tiếp (Mặc định tiền mặt, không tự động in bill)
+  const handleCheckoutDirect = async () => {
+    if (!currentOrder) return
+    setSaving(true)
+    try {
+      // Fetch thông tin mới nhất của đơn hàng từ DB để kiểm tra xem đã chuyển khoản QR thành công chưa
+      const { data: latestOrder } = await api.get(`/orders/${currentOrder._id}`)
+      
+      if (latestOrder.status === 'paid') {
+        // Đã thanh toán trước đó (do Webhook SePay ghi nhận và lưu)
+        toast.success('Đã nhận chuyển khoản QR thành công!');
+      } else {
+        // Chưa thanh toán -> Gửi yêu cầu cập nhật thanh toán trực tiếp (mặc định cash)
+        await api.put(`/orders/${currentOrder._id}`, { status: 'paid', paymentMethod: 'cash' })
+        toast.success('Thanh toán thành công!');
+      }
+      
+      // GIẢI PHÓNG BÀN & GIỎ HÀNG LẬP TỨC TRÊN POS
+      await handleFinishTransaction()
+    } catch (err) {
+      toast.error('Lỗi thanh toán: ' + (err.response?.data?.message || err.message))
+    } finally {
+      setSaving(false)
+    }
   }
 
   // Thêm món (cho bàn trống)
@@ -172,40 +473,9 @@ export default function POS() {
       toast.success('Đã tạo đơn hàng')
       await fetchTables()
       await fetchTakeawayOrders()
-      
-      setSelectedTable(null)
-      setCurrentOrder(null)
+      resetCartAndSetTakeaway()
     } catch (err) {
       toast.error(err.response?.data?.message || 'Lỗi tạo đơn')
-    } finally { setSaving(false) }
-  }
-
-  const handleCheckout = async () => {
-    if (!currentOrder) return
-    setSaving(true)
-    try {
-      // Tải trước ảnh QR để tránh bị trắng khi in
-      const qrUrl = `https://img.vietqr.io/image/MB-0963664924-compact2.png?amount=${currentOrder.total}&addInfo=Thanh%20toan%20don%20hang%20${currentOrder.orderCode.replace('#', '')}&accountName=TRAN%20VAN%20ANH`
-      await new Promise((resolve) => {
-        const img = new Image()
-        img.src = qrUrl
-        img.onload = () => resolve()
-        img.onerror = () => resolve() // Tiếp tục kể cả khi lỗi mạng không tải được ảnh
-        setTimeout(resolve, 3000) // Timeout tối đa 3s
-      })
-
-      await api.put(`/orders/${currentOrder._id}`, { status: 'paid', paymentMethod: 'cash' })
-      setReceiptData({ ...currentOrder, paidAt: new Date(), paymentMethod: 'cash' })
-      toast.success('Thanh toán thành công')
-      await fetchTables()
-      await fetchTakeawayOrders()
-      setSelectedTable(null)
-      setCurrentOrder(null)
-      
-      // Mở hộp thoại in
-      setTimeout(() => window.print(), 300)
-    } catch (err) {
-      toast.error('Lỗi thanh toán')
     } finally { setSaving(false) }
   }
 
@@ -263,8 +533,7 @@ export default function POS() {
       toast.success('Đã hủy đơn hàng')
       await fetchTables()
       await fetchTakeawayOrders()
-      setSelectedTable(null)
-      setCurrentOrder(null)
+      resetCartAndSetTakeaway()
     } catch (err) {
       toast.error('Lỗi khi hủy đơn hàng')
     } finally { setSaving(false) }
@@ -274,25 +543,23 @@ export default function POS() {
     if (!currentOrder) return
     setSaving(true)
     try {
-      await api.put(`/orders/${currentOrder._id}/change-table`, { newTableId: targetTableId })
+      const { data } = await api.put(`/orders/${currentOrder._id}/change-table`, { newTableId: targetTableId })
       toast.success('Chuyển bàn thành công')
       setShowMoveTableModal(false)
       
       // Load lại tables và cập nhật state selectedTable sang bàn mới
       const updatedTables = await api.get('/tables')
-      const sorted = updatedTables.data.sort((a, b) => {
-        if (a.number === 0) return -1
-        if (b.number === 0) return 1
-        return a.number - b.number
-      })
+      const sorted = updatedTables.data.filter(t => t.number !== 0).sort((a, b) => a.number - b.number)
       setTables(sorted)
       
       const newTable = sorted.find(t => t._id === targetTableId)
       setSelectedTable(newTable)
       
-      // Load lại order
-      const { data: orderData } = await api.get(`/orders/${currentOrder._id}`)
-      setCurrentOrder(orderData)
+      // Gán lại currentOrder từ kết quả trả về
+      setCurrentOrder(data.order || data)
+
+      // Tải lại đơn mang về để đồng bộ giao diện
+      await fetchTakeawayOrders()
     } catch (err) {
       toast.error(err.response?.data?.message || 'Lỗi chuyển bàn')
     } finally { setSaving(false) }
@@ -399,99 +666,229 @@ export default function POS() {
     return true
   })
 
+  const filteredTakeawayOrders = leftTab === 'empty' || leftTab === 'occupied'
+    ? []
+    : takeawayOrders.filter(order => {
+        if (!leftSearchQuery) return true
+        const query = leftSearchQuery.toLowerCase()
+        return (
+          order.orderCode.toLowerCase().includes(query) ||
+          (order.note && order.note.toLowerCase().includes(query)) ||
+          (order.staffName && order.staffName.toLowerCase().includes(query))
+        )
+      })
+
+  const filteredTables = tables.filter(t => {
+    // Lọc theo tìm kiếm ở cột trái
+    if (leftSearchQuery) {
+      const query = leftSearchQuery.toLowerCase()
+      const matchesNumber = String(t.number).includes(query)
+      const matchesName = t.name && t.name.toLowerCase().includes(query)
+      const matchesOrderCode = t.currentOrder?.orderCode && t.currentOrder.orderCode.toLowerCase().includes(query)
+      if (!matchesNumber && !matchesName && !matchesOrderCode) return false
+    }
+    // Lọc theo bộ lọc status bàn (Trống / Đang dùng) thông qua leftTab
+    if (leftTab === 'empty' && t.status !== 'empty') return false
+    if (leftTab === 'occupied' && t.status !== 'occupied') return false
+    return true
+  })
+
   return (
     <div className="flex flex-col h-[calc(100vh-80px)] -m-6 bg-brown-50">
       <div className="flex flex-1 overflow-hidden">
         {/* LEFT: Tables & Takeaway */}
         <div className="w-2/3 p-6 overflow-y-auto border-r border-brown-200 flex flex-col gap-6">
-          
-          {/* Takeaway Section */}
-          <div className="bg-white p-5 rounded-2xl border border-brown-100 shadow-sm">
-            <div className="flex justify-between items-center mb-4">
-              <div className="flex items-center gap-2.5">
-                <span className="text-3xl">🥡</span>
-                <div>
-                  <h3 className="font-serif text-lg font-bold text-brown-900">Bán Mang Về</h3>
-                  <p className="text-xs text-brown-500">Quản lý các đơn hàng khách mua mang đi</p>
-                </div>
+          {/* Thanh tìm kiếm và Tabs lọc */}
+          <div className="bg-white p-4 rounded-2xl border border-brown-100 shadow-sm space-y-4">
+            <div className="relative">
+              <i className="ti ti-search absolute left-3 top-1/2 -translate-y-1/2 text-brown-400" />
+              <input
+                className="input pl-9 text-xs py-2 bg-brown-50 border-none rounded-lg"
+                placeholder="Tìm nhanh bàn, mã đơn hoặc khách hàng..."
+                value={leftSearchQuery}
+                onChange={(e) => setLeftSearchQuery(e.target.value)}
+              />
+            </div>
+            
+            <div className="flex justify-between items-center border-t border-brown-100 pt-3">
+              <div className="flex gap-4 flex-wrap">
+                <button
+                  onClick={() => setLeftTab('all')}
+                  className={`pb-1 text-xs font-bold border-b-2 transition-all ${leftTab === 'all' ? 'border-sky-600 text-sky-600' : 'border-transparent text-brown-500 hover:text-brown-900'}`}
+                >
+                  Tất cả ({takeawayOrders.length + tables.length})
+                </button>
+                <button
+                  onClick={() => setLeftTab('takeaway')}
+                  className={`pb-1 text-xs font-bold border-b-2 transition-all ${leftTab === 'takeaway' ? 'border-sky-600 text-sky-600' : 'border-transparent text-brown-500 hover:text-brown-900'}`}
+                >
+                  Đơn mang về ({takeawayOrders.length})
+                </button>
+                <button
+                  onClick={() => setLeftTab('empty')}
+                  className={`pb-1 text-xs font-bold border-b-2 transition-all ${leftTab === 'empty' ? 'border-sky-600 text-sky-600' : 'border-transparent text-brown-500 hover:text-brown-900'}`}
+                >
+                  Bàn trống ({tables.filter(t => t.status === 'empty').length})
+                </button>
+                <button
+                  onClick={() => setLeftTab('occupied')}
+                  className={`pb-1 text-xs font-bold border-b-2 transition-all ${leftTab === 'occupied' ? 'border-sky-600 text-sky-600' : 'border-transparent text-brown-500 hover:text-brown-900'}`}
+                >
+                  Bàn đang phục vụ ({tables.filter(t => t.status === 'occupied').length})
+                </button>
               </div>
-              <button
-                onClick={handleNewTakeawayOrder}
-                className="btn bg-sky-600 hover:bg-sky-700 text-white border-sky-600 flex items-center gap-1.5 font-semibold py-2 px-4 shadow-sm hover:shadow transition-all text-sm rounded-xl"
-              >
-                <i className="ti ti-plus text-base" /> Tạo đơn mang về mới
-              </button>
+            </div>
+          </div>
+
+          {/* Unified Grid Section */}
+          <div className="space-y-4">
+            <div className="flex justify-between items-center">
+              <h2 className="text-base font-serif font-bold text-brown-900 flex items-center gap-2">
+                <span>☕</span> Trạng thái phục vụ
+              </h2>
             </div>
 
-            {takeawayOrders.length === 0 ? (
-              <div className="border border-dashed border-brown-200 rounded-xl p-6 text-center text-brown-400 text-sm">
-                Không có đơn hàng mang về nào đang chờ
-              </div>
-            ) : (
-              <div className="grid grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-                {takeawayOrders.map(order => (
+            <div className="grid grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3.5">
+              {/* 1. Render các đơn mang về đang chờ (nếu tab là 'all' hoặc 'takeaway') */}
+              {(leftTab === 'all' || leftTab === 'takeaway') && filteredTakeawayOrders.map(order => {
+                const minutesElapsed = Math.round((new Date() - new Date(order.createdAt)) / 60000)
+                const timeDisplay = minutesElapsed > 0 ? `${minutesElapsed}'` : '0\''
+                const isSelected = currentOrder?._id === order._id
+
+                return (
                   <div
                     key={order._id}
                     onClick={() => handleSelectTakeawayOrder(order)}
-                    className={`rounded-xl border-2 p-3 text-center cursor-pointer transition-all hover:shadow-md flex flex-col items-center justify-center min-h-[90px] ${
-                      currentOrder?._id === order._id ? 'ring-4 ring-sky-400 ring-opacity-40 border-sky-400 bg-sky-50' : 'bg-white border-sky-100 hover:border-sky-300'
+                    className={`rounded-2xl border-2 p-3.5 cursor-pointer transition-all hover:shadow-md flex flex-col justify-between min-h-[145px] relative ${
+                      isSelected
+                        ? 'border-sky-500 bg-sky-50/20 ring-2 ring-sky-300 ring-opacity-30 shadow-sm'
+                        : 'bg-white border-sky-100 hover:border-sky-300'
                     }`}
                   >
-                    <span className="text-[10px] uppercase tracking-wider font-bold text-sky-600 mb-1">
-                      {order.status === 'pending' ? 'Chờ pha chế' : 'Đang làm'}
-                    </span>
-                    <div className="font-bold text-brown-900 text-sm font-mono">{order.orderCode}</div>
-                    <div className="text-[10px] text-brown-500 mt-1">
-                      {order.items?.length || 0} món • {new Date(order.createdAt).toLocaleTimeString('vi-VN', {hour: '2-digit', minute:'2-digit'})}
+                    {/* Top info row */}
+                    <div className="flex justify-between items-start w-full mb-1">
+                      <div className="w-6 h-6 rounded-full bg-sky-100 text-sky-700 text-xs font-bold flex items-center justify-center">
+                        🥡
+                      </div>
+                      <div className="text-right">
+                        <span className="text-[8px] font-bold text-orange-500 block uppercase tracking-wide">Đang làm</span>
+                        <span className="text-[10px] font-extrabold text-orange-600 block">{timeDisplay}</span>
+                      </div>
                     </div>
-                    <div className="text-xs font-bold text-sky-700 mt-1.5">{formatVND(order.total)}</div>
+
+                    {/* Middle info */}
+                    <div className="text-center my-2">
+                      <div className="text-xs font-extrabold text-brown-900 truncate">
+                        {order.orderCode}
+                      </div>
+                      {order.note && (
+                        <div className="text-[10px] text-brown-500 truncate max-w-full px-1">
+                          {order.note}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Bottom price */}
+                    <div className="text-center border-t border-brown-50 pt-2 mt-auto">
+                      <span className="text-[9px] text-brown-400 block uppercase font-medium">Tổng cộng</span>
+                      <span className="text-xs font-extrabold text-sky-700 block">
+                        {formatVND(order.total)}
+                      </span>
+                    </div>
                   </div>
-                ))}
+                )
+              })}
+
+              {/* 2. Render các bàn phục vụ (nếu tab là 'all' hoặc 'empty' hoặc 'occupied') */}
+              {(leftTab === 'all' || leftTab === 'empty' || leftTab === 'occupied') && filteredTables.map(t => {
+                const isOccupied = t.status === 'occupied'
+                const isActiveSelected = selectedTable?._id === t._id && selectedTable?._id !== 'takeaway'
+
+                if (!isOccupied) {
+                  return (
+                    <div
+                      key={t._id}
+                      onClick={() => handleSelectTable(t)}
+                      className={`rounded-2xl border-2 bg-white p-3 cursor-pointer transition-all hover:shadow-md flex flex-col items-center justify-center min-h-[145px] text-center ${
+                        isActiveSelected
+                          ? 'border-sky-500 ring-2 ring-sky-300 ring-opacity-30'
+                          : 'border-brown-100 hover:border-brown-300'
+                      }`}
+                    >
+                      <div className="w-8 h-8 rounded-full bg-brown-50 flex items-center justify-center text-brown-400 mb-2">
+                        <i className="ti ti-plus text-sm" />
+                      </div>
+                      <div className="text-xs font-bold text-brown-850">Bàn {t.number}</div>
+                      <div className="text-[10px] text-green-600 font-bold uppercase mt-1">Còn trống</div>
+                    </div>
+                  )
+                } else {
+                  let timeDisplay = ''
+                  if (t.currentOrder && t.currentOrder.createdAt) {
+                    const minutesElapsed = Math.round((new Date() - new Date(t.currentOrder.createdAt)) / 60000)
+                    if (minutesElapsed < 60) {
+                      timeDisplay = `${minutesElapsed}'`
+                    } else {
+                      const hours = Math.floor(minutesElapsed / 60)
+                      const mins = minutesElapsed % 60
+                      timeDisplay = `${hours}h ${mins}'`
+                    }
+                  }
+
+                  return (
+                    <div
+                      key={t._id}
+                      onClick={() => handleSelectTable(t)}
+                      className={`rounded-2xl border-2 p-3 cursor-pointer transition-all hover:shadow-md flex flex-col min-h-[145px] justify-between relative ${
+                        isActiveSelected
+                          ? 'border-sky-500 bg-sky-50/20 ring-2 ring-sky-300 ring-opacity-30 shadow-sm'
+                          : 'bg-white border-sky-200 hover:border-sky-400'
+                      }`}
+                    >
+                      {/* Top info row */}
+                      <div className="flex justify-between items-start w-full mb-1">
+                        <div className="w-5 h-5 rounded-full bg-sky-600 text-white text-[10px] font-bold flex items-center justify-center">
+                          {t.number}
+                        </div>
+                        <div className="text-right">
+                          <span className="text-[8px] font-bold text-red-500 block uppercase tracking-wide">Đã ngồi</span>
+                          <span className="text-[10px] font-extrabold text-red-600 block">{timeDisplay || '0\''}</span>
+                        </div>
+                      </div>
+
+                      {/* Middle info */}
+                      <div className="text-center my-2">
+                        <div className="text-xs font-extrabold text-brown-900">Bàn {t.number}</div>
+                      </div>
+
+                      {/* Bottom price */}
+                      <div className="text-center border-t border-brown-50 pt-2 mt-auto">
+                        <span className="text-[9px] text-brown-400 block uppercase font-medium">Tổng cộng</span>
+                        <span className="text-xs font-extrabold text-brown-900 block">
+                          {t.currentOrder?.total ? formatVND(t.currentOrder.total) : '0đ'}
+                        </span>
+                      </div>
+                    </div>
+                  )
+                }
+              })}
+            </div>
+
+            {/* Empty State */}
+            {((leftTab === 'takeaway' && filteredTakeawayOrders.length === 0) ||
+              (leftTab === 'empty' && filteredTables.length === 0) ||
+              (leftTab === 'occupied' && filteredTables.length === 0) ||
+              (leftTab === 'all' && filteredTakeawayOrders.length === 0 && filteredTables.length === 0)) && (
+              <div className="text-center text-brown-400 text-xs py-12 bg-white rounded-2xl border border-brown-100 shadow-sm">
+                Không tìm thấy bàn hoặc đơn hàng nào phù hợp
               </div>
             )}
-          </div>
-
-          {/* Dine-in Tables Section */}
-          <div>
-            <h2 className="text-lg font-serif font-bold text-brown-900 mb-3 flex items-center gap-2">
-              <span>☕</span> Sơ đồ bàn phục vụ
-            </h2>
-            <div className="grid grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
-              {tables.map(t => (
-                <div
-                  key={t._id}
-                  onClick={() => handleSelectTable(t)}
-                  className={`rounded-xl border-2 p-3 text-center cursor-pointer transition-all hover:shadow-md flex flex-col items-center justify-center min-h-[100px] ${
-                    selectedTable?._id === t._id && selectedTable?._id !== 'takeaway' ? 'ring-4 ring-brown-400 ring-opacity-50 ' : ''
-                  } ${
-                    t.status === 'occupied' ? 'bg-red-50 border-red-200' :
-                    t.status === 'reserved' ? 'bg-amber-50 border-amber-200' :
-                    'bg-green-50 border-green-200'
-                  }`}
-                >
-                  <div className="text-2xl mb-1">
-                    {t.status === 'occupied' ? '🔴' : t.status === 'reserved' ? '🟡' : '🟢'}
-                  </div>
-                  <div className="font-bold text-brown-900 text-sm">
-                    Bàn {t.number}
-                  </div>
-                  {t.status === 'occupied' && t.currentOrder?.total && (
-                    <div className="text-[10px] font-semibold text-red-600 mt-1">{formatVND(t.currentOrder.total)}</div>
-                  )}
-                </div>
-              ))}
-            </div>
           </div>
         </div>
 
         {/* RIGHT: Order / Cart */}
         <div className="w-1/3 bg-white flex flex-col shadow-[-4px_0_15px_-3px_rgba(0,0,0,0.05)] z-10">
-          {!selectedTable ? (
-            <div className="flex-1 flex flex-col items-center justify-center text-brown-400 p-6 text-center">
-              <i className="ti ti-hand-click text-5xl mb-4 opacity-50" />
-              <p>Chọn một bàn hoặc tạo đơn "Mang về"<br/>để bắt đầu đặt món</p>
-            </div>
-          ) : (!currentOrder || isEditingOrder) ? (
+          {(!currentOrder || isEditingOrder) ? (
             // NEW ORDER FORM & EDIT ORDER FORM
             <div className="flex flex-col h-full">
               <div className="p-4 border-b border-brown-100 bg-brown-50 flex justify-between items-center">
@@ -499,16 +896,47 @@ export default function POS() {
                   <div className="font-serif text-lg font-bold text-brown-900">
                     {isEditingOrder 
                       ? `Sửa đơn ${currentOrder?.orderCode}` 
-                      : (selectedTable._id === 'takeaway' ? 'Đơn Mang Về' : `Bàn ${selectedTable.number}`)}
+                      : (selectedTable?._id === 'takeaway' ? 'Đơn Mang Về' : selectedTable?._id === 'counter' ? 'Đơn Tại Quầy' : `Bàn ${selectedTable?.number || ''}`)}
                   </div>
                   <div className="text-xs text-brown-500">
                     {isEditingOrder ? 'Chỉnh sửa đơn hàng đang phục vụ' : 'Tạo đơn mới'}
                   </div>
                 </div>
-                <button className="text-brown-400 hover:text-brown-700" onClick={() => { setSelectedTable(null); setIsEditingOrder(false) }}><i className="ti ti-x" /></button>
+                <button className="text-brown-400 hover:text-brown-700" onClick={resetCartAndSetTakeaway}><i className="ti ti-x" /></button>
               </div>
               
               <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4">
+                {!isEditingOrder && (
+                  <div className="bg-brown-50 p-3.5 rounded-xl border border-brown-100 space-y-2">
+                    <label className="text-xs font-bold text-brown-700 flex items-center gap-1.5 uppercase tracking-wide">
+                      <span>🥡</span> LOẠI PHỤC VỤ / BÀN
+                    </label>
+                    <select
+                      className="select select-sm w-full text-xs font-medium bg-white border border-brown-200 rounded-lg"
+                      value={selectedTable?._id || 'takeaway'}
+                      onChange={(e) => {
+                        const val = e.target.value
+                        if (val === 'takeaway') {
+                          handleNewTakeawayOrder()
+                        } else {
+                          const tbl = tables.find(t => t._id === val)
+                          if (tbl) handleSelectTable(tbl)
+                        }
+                      }}
+                    >
+                      <option value="takeaway">🥡 Mang về / Tại quầy</option>
+                      {tables.length > 0 && (
+                        <optgroup label="Chọn bàn trống">
+                          {tables
+                            .filter(t => t.status === 'empty')
+                            .map(t => (
+                              <option key={t._id} value={t._id}>☕ Bàn {t.number}</option>
+                            ))}
+                        </optgroup>
+                      )}
+                    </select>
+                  </div>
+                )}
                 {/* Search & Categories */}
                 <div className="flex flex-col gap-2">
                   <div className="flex gap-2 items-center">
@@ -521,7 +949,7 @@ export default function POS() {
                       onClick={() => setShowCustomProductModal(true)}
                       className="btn bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-200 text-xs py-2 px-3 flex items-center gap-1 shrink-0 font-medium shadow-sm transition-all"
                     >
-                      <i className="ti ti-plus text-xs" /> Món ngoài thực đơn
+                      <i className="ti ti-plus text-xs" /> Thêm món
                     </button>
                   </div>
                   <div className="flex gap-2 overflow-x-auto pb-1">
@@ -570,6 +998,8 @@ export default function POS() {
                 )}
                 
                 <div className="mt-auto space-y-2 pt-2 border-t border-brown-100">
+
+
                   <div className="text-xs font-semibold text-brown-500 uppercase">Thông tin thêm</div>
                   <input className="input text-xs py-1.5" placeholder="Ghi chú đơn hàng..." value={note} onChange={e => setNote(e.target.value)} />
                   
@@ -646,7 +1076,7 @@ export default function POS() {
                   </div>
                 ) : (
                   <button className="btn btn-primary w-full py-3 text-base justify-center" onClick={handleCreateOrder} disabled={saving || items.length === 0}>
-                    {saving ? 'Đang xử lý...' : 'Đặt món & Tạo đơn'}
+                    {saving ? 'Đang xử lý...' : 'Tạo đơn'}
                   </button>
                 )}
               </div>
@@ -657,11 +1087,11 @@ export default function POS() {
               <div className="p-4 border-b border-brown-100 bg-brown-800 text-brown-50 flex justify-between items-center">
                 <div>
                   <div className="font-serif text-lg font-bold">
-                    {selectedTable._id === 'takeaway' ? 'Đơn Mang Về' : `Bàn ${selectedTable.number}`}
+                    {selectedTable?._id === 'takeaway' ? 'Đơn Mang Về' : `Bàn ${selectedTable?.number || ''}`}
                   </div>
                   <div className="text-xs opacity-80">Đang phục vụ</div>
                 </div>
-                <button className="text-brown-200 hover:text-white" onClick={() => setSelectedTable(null)}><i className="ti ti-x" /></button>
+                <button className="text-brown-200 hover:text-white" onClick={resetCartAndSetTakeaway}><i className="ti ti-x" /></button>
               </div>
 
               {!currentOrder ? (
@@ -671,7 +1101,7 @@ export default function POS() {
                   <div className="flex-1 overflow-y-auto p-4">
                     <div className="flex justify-between items-center mb-3 pb-2 border-b border-brown-100">
                       <span className="text-xs text-brown-500">Mã đơn: <span className="font-mono font-bold text-brown-900">{currentOrder.orderCode}</span></span>
-                      <Badge status={currentOrder.status} />
+                      {currentOrder.status !== 'processing' && <Badge status={currentOrder.status} />}
                     </div>
                     
                     <div className="flex justify-between text-xs text-brown-600 mb-4 bg-brown-50 px-3 py-2 rounded-lg border border-brown-100">
@@ -717,28 +1147,66 @@ export default function POS() {
                       <span className="text-2xl font-bold font-serif text-brown-900">{formatVND(currentOrder.total)}</span>
                     </div>
 
-                    <button className="btn w-full bg-green-600 text-white border-green-600 hover:bg-green-700 py-3 text-base justify-center" onClick={handleCheckout} disabled={saving}>
-                      <i className="ti ti-check" /> {saving ? 'Đang xử lý...' : 'Thanh toán & In HĐ'}
-                    </button>
+                    <div className="flex flex-col gap-2">
+                      {/* Nút in hóa đơn độc lập */}
+                      <button
+                        className="btn bg-amber-600 hover:bg-amber-700 text-white border-amber-600 py-3 text-base justify-center flex items-center gap-1.5 font-bold shadow-sm transition-all rounded-xl cursor-pointer"
+                        onClick={() => {
+                          if (currentOrder) {
+                            handleDirectPrint(currentOrder);
+                          }
+                        }}
+                        disabled={saving || !currentOrder}
+                      >
+                        <i className="ti ti-printer text-base" /> In hóa đơn
+                      </button>
 
-                    <div className="grid grid-cols-2 gap-2 mt-3">
-                      <button className="btn btn-sm text-xs justify-center" onClick={handleStartEditOrder} disabled={saving}>
-                        <i className="ti ti-edit" /> Sửa đơn
+                      {/* Nút xác nhận thanh toán (Gộp tiền mặt & QR) */}
+                      <button
+                        className={`btn py-3 text-base justify-center flex items-center gap-1.5 font-bold shadow-sm transition-all rounded-xl cursor-pointer ${
+                          currentOrder?.status === 'paid'
+                            ? '!bg-blue-600 hover:!bg-blue-700 text-white !border-blue-600'
+                            : '!bg-green-600 hover:!bg-green-700 text-white !border-green-600'
+                        }`}
+                        onClick={handleCheckoutDirect}
+                        disabled={saving || !currentOrder}
+                      >
+                        <i className="ti ti-circle-check text-base" />
+                        {currentOrder?.status === 'paid' ? 'Xác nhận thanh toán (Đã nhận QR)' : 'Xác nhận thanh toán'}
                       </button>
-                      <button className="btn btn-sm btn-danger text-xs justify-center" onClick={handleCancelOrder} disabled={saving}>
-                        <i className="ti ti-trash" /> Huỷ đơn
-                      </button>
-                      {selectedTable._id !== 'takeaway' && (
-                        <>
-                          <button className="btn btn-sm text-xs justify-center" onClick={() => setShowMoveTableModal(true)} disabled={saving}>
-                            <i className="ti ti-arrows-exchange" /> Chuyển bàn
-                          </button>
-                          <button className="btn btn-sm text-xs justify-center bg-brown-600 text-white hover:bg-brown-700 border-brown-600 font-semibold" onClick={() => setShowMergeTableModal(true)} disabled={saving}>
+                    </div>
+
+                    {currentOrder?.status !== 'paid' && (
+                      <div className="grid grid-cols-2 gap-2 mt-3">
+                        <button className="btn btn-sm text-xs justify-center" onClick={handleStartEditOrder} disabled={saving}>
+                          <i className="ti ti-edit" /> Sửa đơn
+                        </button>
+                        <button className="btn btn-sm btn-danger text-xs justify-center" onClick={handleCancelOrder} disabled={saving}>
+                          <i className="ti ti-trash" /> Huỷ đơn
+                        </button>
+                        
+                        {/* Chuyển bàn / Chuyển vào bàn */}
+                        <button className="btn btn-sm text-xs justify-center bg-sky-50 text-sky-700 hover:bg-sky-100 border-sky-200 font-semibold" onClick={() => setShowMoveTableModal(true)} disabled={saving}>
+                          <i className="ti ti-arrows-exchange" /> {currentOrder?.type === 'takeaway' ? 'Chuyển vào bàn' : 'Chuyển bàn'}
+                        </button>
+                        
+                        {/* Chuyển mang về hoặc Ghép bàn */}
+                        {currentOrder?.type === 'dine-in' ? (
+                          <div className="grid grid-cols-2 gap-1 col-span-1">
+                            <button className="btn btn-sm text-[10px] px-1 justify-center bg-amber-50 text-amber-700 hover:bg-amber-100 border-amber-200 font-semibold" onClick={handleConvertToTakeaway} disabled={saving} title="Chuyển sang mang về">
+                              <i className="ti ti-shopping-cart-x text-xs" /> Mang về
+                            </button>
+                            <button className="btn btn-sm text-[10px] px-1 justify-center bg-brown-600 text-white hover:bg-brown-700 border-brown-600 font-semibold" onClick={() => setShowMergeTableModal(true)} disabled={saving} title="Ghép bàn">
+                              <i className="ti ti-git-merge text-xs" /> Ghép
+                            </button>
+                          </div>
+                        ) : (
+                          <button className="btn btn-sm text-xs justify-center bg-brown-50 text-brown-400 border-brown-200 cursor-not-allowed" disabled>
                             <i className="ti ti-git-merge" /> Ghép bàn
                           </button>
-                        </>
-                      )}
-                    </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </>
               )}
@@ -751,7 +1219,7 @@ export default function POS() {
       <Modal
         open={showMoveTableModal}
         onClose={() => setShowMoveTableModal(false)}
-        title={`Chuyển đơn từ Bàn ${selectedTable?.number} sang bàn khác`}
+        title={selectedTable?._id === 'takeaway' ? 'Chuyển đơn mang về vào bàn phục vụ' : `Chuyển đơn từ Bàn ${selectedTable?.number} sang bàn khác`}
         footer={
           <button className="btn" onClick={() => setShowMoveTableModal(false)}>Đóng</button>
         }
@@ -892,7 +1360,7 @@ export default function POS() {
       <Modal
         open={showCustomProductModal}
         onClose={() => setShowCustomProductModal(false)}
-        title="Thêm món ngoài thực đơn"
+        title="Thêm tên món"
         footer={
           <div className="flex gap-2 justify-end w-full">
             <button className="btn" onClick={() => setShowCustomProductModal(false)}>Hủy</button>
@@ -953,20 +1421,19 @@ export default function POS() {
         </div>
       </Modal>
 
-
       {/* PRINT RECEIPT (Hidden on screen but preloaded by browser) */}
       <div id="print-receipt" className="absolute left-[-9999px] top-[-9999px] opacity-0 pointer-events-none">
         {receiptData && (
           <div className="w-[80mm] mx-auto text-black font-sans text-[12px] leading-tight p-4">
             <div className="text-center mb-4">
               <h1 className="text-xl font-bold font-serif mb-1">Brew & Co.</h1>
-              <p className="text-[10px]">123 Đường Cà Phê, Quận 1, TP.HCM</p>
-              <p className="text-[10px]">ĐT: 090 123 4567</p>
+              <p className="text-[10px]">Liên Minh, Đan Phượng Hà Nội</p>
+              <p className="text-[10px]">ĐT: 0963664924</p>
               <h2 className="text-lg font-bold mt-3 uppercase border-b border-dashed border-black pb-2">Hóa Đơn Thanh Toán</h2>
             </div>
             
             <div className="mb-3">
-              <p>Ngày: {formatDateTime(receiptData.paidAt)}</p>
+              <p>Ngày: {formatDateTime(receiptData.paidAt || new Date())}</p>
               <p>Mã đơn: <b>{receiptData.orderCode}</b></p>
               <p>Bàn: <b>{(receiptData.tableNumber === 0 || receiptData.type === 'takeaway' || !receiptData.tableNumber) ? 'Mang về' : receiptData.tableNumber}</b></p>
               <p>Thu ngân: {receiptData.staffName}</p>
@@ -1003,18 +1470,18 @@ export default function POS() {
               </div>
             </div>
 
-            {/* QR Code thanh toán trực tiếp trên hóa đơn */}
+            {/* QR Code thanh toán trực tiếp tự động tích hợp trên hóa đơn */}
             <div className="flex flex-col items-center justify-center my-4 border-t border-b border-dashed border-black py-3 text-center">
-              <p className="text-[9px] mb-1.5 font-bold uppercase tracking-wider">Quét mã QR để thanh toán</p>
+              <p className="text-[9px] mb-1.5 font-bold uppercase tracking-wider">Quét mã QR để chuyển khoản</p>
               <img
-                src={`https://img.vietqr.io/image/MB-0963664924-compact2.png?amount=${receiptData.total}&addInfo=Thanh%20toan%20don%20hang%20${receiptData.orderCode.replace('#', '')}&accountName=TRAN%20VAN%20ANH`}
+                src={`https://img.vietqr.io/image/MB-0963664924-qr_only.png?amount=${receiptData.total}&addInfo=Thanh%20toan%20don%20hang%20${receiptData.orderCode.replace('#', '')}&accountName=TRAN%20VAN%20ANH`}
                 alt="VietQR Code"
                 className="w-32 h-32 object-contain mx-auto"
               />
               <p className="text-[8px] mt-1 font-semibold">MB Bank - 0963664924 - Trần Văn Anh</p>
             </div>
 
-            <div className="text-center text-[10px] italic">
+            <div className="text-center text-[10px] italic mt-4">
               <p>Cảm ơn quý khách và hẹn gặp lại!</p>
             </div>
           </div>

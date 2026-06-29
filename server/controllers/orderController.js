@@ -57,7 +57,7 @@ const updateDailyReport = async (dateStr) => {
 
 // GET /api/orders
 export const getOrders = asyncHandler(async (req, res) => {
-  const { status, date, tableNumber, type } = req.query;
+  const { status, date, tableNumber, type, sort, limit } = req.query;
   const filter = {};
   if (status) {
     if (status.includes(',')) {
@@ -75,6 +75,10 @@ export const getOrders = asyncHandler(async (req, res) => {
     end.setHours(23, 59, 59, 999);
     filter.createdAt = { $gte: start, $lte: end };
   }
+  
+  const sortQuery = sort === 'updatedAt' ? { updatedAt: -1 } : { createdAt: -1 };
+  const limitValue = limit ? Number(limit) : 200;
+
   const orders = await Order.find(filter)
     .populate('table', 'number name')
     .populate('staff', 'name')
@@ -83,8 +87,8 @@ export const getOrders = asyncHandler(async (req, res) => {
       populate: { path: 'product', select: 'name price emoji' }
     })
     .populate('payment')
-    .sort({ createdAt: -1 })
-    .limit(200);
+    .sort(sortQuery)
+    .limit(limitValue);
   res.json(orders);
 });
 
@@ -122,7 +126,7 @@ export const createOrder = asyncHandler(async (req, res) => {
     items: [],
     discount,
     note,
-    status: 'pending',
+    status: 'processing',
   });
 
   // 2. Tạo các OrderItem liên kết tới Order này
@@ -355,15 +359,41 @@ export const changeTable = asyncHandler(async (req, res) => {
   const order = await Order.findById(req.params.id);
   if (!order) return res.status(404).json({ message: 'Không tìm thấy đơn hàng' });
 
-  if (order.type === 'takeaway') {
-    return res.status(400).json({ message: 'Đơn hàng mang về không thể chuyển bàn' });
-  }
-
   if (order.status === 'paid' || order.status === 'cancelled') {
     return res.status(400).json({ message: 'Không thể chuyển bàn cho đơn hàng đã thanh toán hoặc đã huỷ' });
   }
 
-  const { newTableId } = req.body;
+  const { newTableId, toTakeaway } = req.body;
+
+  // Trường hợp 1: Chuyển đơn sang Mang Về (takeaway)
+  if (toTakeaway || newTableId === 'takeaway') {
+    const oldTableId = order.table;
+
+    order.type = 'takeaway';
+    order.table = undefined;
+    order.tableNumber = undefined;
+    await order.save();
+
+    // Giải phóng bàn cũ nếu có
+    if (oldTableId) {
+      await Table.findByIdAndUpdate(oldTableId, {
+        status: 'empty',
+        currentOrder: null,
+      });
+    }
+
+    const populatedOrder = await Order.findById(order._id)
+      .populate('table', 'number name')
+      .populate('staff', 'name')
+      .populate({
+        path: 'items',
+        populate: { path: 'product', select: 'name price emoji' }
+      });
+
+    return res.json({ message: 'Chuyển sang đơn mang về thành công', order: populatedOrder });
+  }
+
+  // Trường hợp 2: Chuyển đơn sang Bàn mới (dine-in)
   const newTable = await Table.findById(newTableId);
   if (!newTable) return res.status(404).json({ message: 'Không tìm thấy bàn mới' });
 
@@ -374,15 +404,18 @@ export const changeTable = asyncHandler(async (req, res) => {
   const oldTableId = order.table;
 
   // Cập nhật thông tin bàn cho order
+  order.type = 'dine-in';
   order.table = newTable._id;
   order.tableNumber = newTable.number;
   await order.save();
 
-  // Giải phóng bàn cũ
-  await Table.findByIdAndUpdate(oldTableId, {
-    status: 'empty',
-    currentOrder: null,
-  });
+  // Giải phóng bàn cũ nếu có
+  if (oldTableId) {
+    await Table.findByIdAndUpdate(oldTableId, {
+      status: 'empty',
+      currentOrder: null,
+    });
+  }
 
   // Gán đơn cho bàn mới
   newTable.status = 'occupied';
@@ -428,8 +461,8 @@ export const mergeTable = asyncHandler(async (req, res) => {
   const sourceOrder = await Order.findById(sourceTable.currentOrder);
   if (!sourceOrder) return res.status(404).json({ message: 'Không tìm thấy đơn hàng của bàn nguồn' });
 
-  if (sourceOrder.status !== 'pending' && sourceOrder.status !== 'processing') {
-    return res.status(400).json({ message: 'Đơn hàng của bàn nguồn đã thanh toán hoặc đã huỷ, không thể ghép' });
+  if (sourceOrder.status !== 'processing') {
+    return res.status(400).json({ message: 'Đơn hàng của bàn nguồn không ở trạng thái đang pha chế, không thể ghép' });
   }
 
   // 1. Lấy chi tiết OrderItems của cả 2 orders
@@ -502,4 +535,144 @@ export const mergeTable = asyncHandler(async (req, res) => {
     });
 
   res.json({ message: 'Ghép bàn thành công', order: populatedOrder });
+});
+
+// POST /api/orders/:id/webhook-mock
+export const mockWebhook = asyncHandler(async (req, res) => {
+  const order = await Order.findById(req.params.id);
+  if (!order) return res.status(404).json({ message: 'Không tìm thấy đơn hàng' });
+  
+  if (order.status === 'paid') {
+    return res.status(400).json({ message: 'Đơn hàng đã được thanh toán trước đó' });
+  }
+  
+  const prevStatus = order.status;
+  order.status = 'paid';
+  
+  // Tạo Payment mới
+  const payment = await Payment.create({
+    order: order._id,
+    amount: order.total,
+    paymentMethod: 'QR_CODE',
+    status: 'completed',
+    paidAt: new Date(),
+  });
+  order.payment = payment._id;
+  
+  // Tăng soldCount cho các sản phẩm đã bán
+  const populatedItems = await OrderItem.find({ order: order._id });
+  for (const item of populatedItems) {
+    if (item.product) {
+      await Product.findByIdAndUpdate(item.product, {
+        $inc: { soldCount: item.quantity },
+      });
+    }
+  }
+
+  // Trả trạng thái bàn về trống
+  if (order.table) {
+    await Table.findByIdAndUpdate(order.table, {
+      status: 'empty',
+      currentOrder: null,
+    });
+  }
+
+  await order.save();
+
+  // Cập nhật thống kê báo cáo ngày
+  const todayStr = new Date().toISOString().split('T')[0];
+  await updateDailyReport(todayStr);
+
+  res.json({ message: 'Giả lập webhook thành công', order: order });
+});
+
+// POST /api/orders/webhook-sepay
+export const webhookSepay = asyncHandler(async (req, res) => {
+  const { transferType, transferAmount, transactionContent } = req.body;
+  
+  console.log("=== Nhận Webhook SePay ===", req.body);
+
+  if (transferType !== 'in') {
+    return res.status(400).json({ message: 'Bỏ qua giao dịch rút tiền' });
+  }
+
+  // Lấy danh sách các đơn hàng đang pha chế
+  const orders = await Order.find({ status: 'processing' }).populate('table');
+  
+  let targetOrder = null;
+  
+  // 1. Tìm tất cả các số (chuỗi ký số) có trong nội dung giao dịch
+  const numbers = transactionContent.match(/\d+/g) || [];
+  
+  // 2. Thử khớp theo cú pháp chuẩn "don hang XXXX" hoặc "donhangXXXX" hoặc "#XXXX" trước
+  const patternMatch = transactionContent.match(/don[ _]?hang[ _]?#?(\d+)/i) || transactionContent.match(/#(\d+)/);
+  if (patternMatch) {
+    const orderNumber = Number(patternMatch[1]);
+    targetOrder = orders.find(o => Number(o.orderCode.replace('#', '')) === orderNumber);
+  }
+  
+  // 3. Nếu không khớp bằng cú pháp chuẩn, duyệt qua toàn bộ các số tìm thấy trong nội dung để đối chiếu với mã đơn hàng đang chờ thanh toán
+  if (!targetOrder && numbers.length > 0) {
+    for (const numStr of numbers) {
+      const num = Number(numStr);
+      // Bỏ qua các số quá lớn (thường là mã giao dịch ngân hàng chứa ngày giờ hoặc số tài khoản)
+      if (num <= 0 || num > 100000) continue;
+      
+      targetOrder = orders.find(o => Number(o.orderCode.replace('#', '')) === num);
+      if (targetOrder) {
+        console.log(`🔍 Webhook SePay: Khớp đơn hàng qua việc đối chiếu số tự do: ${num} -> ${targetOrder.orderCode}`);
+        break; 
+      }
+    }
+  }
+
+  if (!targetOrder) {
+    return res.status(404).json({ message: `Không tìm thấy đơn hàng đang chờ thanh toán nào khớp với nội dung chuyển khoản: "${transactionContent}"` });
+  }
+
+  // Kiểm tra số tiền chuyển khoản có khớp hoặc lớn hơn tổng tiền đơn hàng không
+  if (transferAmount < targetOrder.total) {
+    return res.status(400).json({ message: `Số tiền chuyển khoản (${transferAmount}) nhỏ hơn tổng tiền đơn hàng (${targetOrder.total})` });
+  }
+
+  // Cập nhật trạng thái đơn hàng
+  targetOrder.status = 'paid';
+
+  // Tạo Payment mới
+  const payment = await Payment.create({
+    order: targetOrder._id,
+    amount: transferAmount,
+    paymentMethod: 'QR_CODE',
+    status: 'completed',
+    paidAt: new Date(),
+  });
+  targetOrder.payment = payment._id;
+
+  // Tăng soldCount cho các sản phẩm đã bán
+  const populatedItems = await OrderItem.find({ order: targetOrder._id });
+  for (const item of populatedItems) {
+    if (item.product) {
+      await Product.findByIdAndUpdate(item.product, {
+        $inc: { soldCount: item.quantity },
+      });
+    }
+  }
+
+  // Trả trạng thái bàn về trống
+  if (targetOrder.table) {
+    await Table.findByIdAndUpdate(targetOrder.table, {
+      status: 'empty',
+      currentOrder: null,
+    });
+  }
+
+  await targetOrder.save();
+
+  // Cập nhật thống kê báo cáo ngày
+  const todayStr = new Date().toISOString().split('T')[0];
+  await updateDailyReport(todayStr);
+
+  console.log(`✅ Webhook SePay: Thanh toán thành công đơn hàng ${targetOrder.orderCode}`);
+
+  res.json({ message: 'Thanh toán đơn hàng thành công qua Webhook SePay', order: targetOrder });
 });

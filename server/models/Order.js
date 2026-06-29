@@ -11,8 +11,8 @@ const orderSchema = new mongoose.Schema(
     items: [{ type: mongoose.Schema.Types.ObjectId, ref: 'OrderItem' }],
     status: {
       type: String,
-      enum: ['pending', 'processing', 'paid', 'cancelled'],
-      default: 'pending',
+      enum: ['processing', 'paid', 'cancelled'],
+      default: 'processing',
     },
     subtotal: { type: Number, default: 0 },
     discount: { type: Number, default: 0 },

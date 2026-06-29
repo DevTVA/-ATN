@@ -123,7 +123,7 @@ export default function Tables() {
                 {t.status === 'occupied' ? '🔴' : t.status === 'reserved' ? '🟡' : '🟢'}
               </div>
               <div className="font-bold text-brown-900 text-sm">Bàn {t.number}</div>
-              <div className="text-[10px] text-brown-400 mt-0.5">{t.capacity} người</div>
+
               <div className={`text-[10px] font-medium mt-1 ${
                 t.status === 'occupied' ? 'text-red-600' :
                 t.status === 'reserved' ? 'text-amber-600' : 'text-green-600'
@@ -171,10 +171,7 @@ export default function Tables() {
               <span className="text-brown-400">Trạng thái</span>
               <Badge status={selected.status} />
             </div>
-            <div className="flex items-center justify-between">
-              <span className="text-brown-400">Sức chứa</span>
-              <span className="font-medium">{selected.capacity} người</span>
-            </div>
+
             {selected.currentOrder && (
               <>
                 <div className="flex items-center justify-between">
@@ -211,15 +208,9 @@ export default function Tables() {
         }
       >
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
-            <div className="form-group">
-              <label className="label">Số bàn *</label>
-              <input className="input" type="number" value={form.number} onChange={e => set('number', e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label className="label">Sức chứa (người)</label>
-              <input className="input" type="number" value={form.capacity} onChange={e => set('capacity', e.target.value)} />
-            </div>
+          <div className="form-group">
+            <label className="label">Số bàn *</label>
+            <input className="input" type="number" value={form.number} onChange={e => set('number', e.target.value)} />
           </div>
           <div className="form-group mb-0">
             <label className="label">Tên / ghi chú</label>

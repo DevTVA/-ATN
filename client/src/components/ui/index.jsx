@@ -20,7 +20,6 @@ export function Modal({ open, onClose, title, children, footer }) {
 
 export function Badge({ status }) {
   const map = {
-    pending: ['badge-pending', 'Chờ xác nhận'],
     processing: ['badge-processing', 'Đang pha chế'],
     paid: ['badge-paid', 'Đã thanh toán'],
     cancelled: ['badge-cancelled', 'Đã huỷ'],

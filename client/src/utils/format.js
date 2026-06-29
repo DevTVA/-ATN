@@ -11,18 +11,20 @@ export const formatDateTime = (d) =>
   d ? `${formatDate(d)} ${formatTime(d)}` : '—'
 
 export const STATUS_LABEL = {
-  pending: 'Chờ xác nhận',
   processing: 'Đang pha chế',
   paid: 'Đã thanh toán',
   cancelled: 'Đã huỷ',
 }
 
 export const CATEGORY_LABEL = {
-  'cafe': 'Cà phê',
-  'tra-sua': 'Trà sữa',
-  'banh-ngot': 'Bánh ngọt',
   'nuoc-ep': 'Nước ép',
-  'khac': 'Khác',
+  'tra-sua': 'Trà sữa',
+  'tra-hoa-qua': 'Trà hoa quả',
+  'do-da-xay': 'Đồ đá xay',
+  'cafe': 'Cà phê',
+  'sinh-to': 'Sinh tố',
+  'banh-ngot': 'Bánh ngọt',
+  'khac': 'Đồ khác...',
 }
 
 export const ROLE_LABEL = {
@@ -36,3 +38,11 @@ export const TABLE_STATUS_LABEL = {
   occupied: 'Đang phục vụ',
   reserved: 'Đã đặt',
 }
+
+export const PAYMENT_METHOD_LABEL = {
+  cash: 'Tiền mặt',
+  card: 'Thẻ',
+  transfer: 'Chuyển khoản',
+  QR_CODE: 'QR Code',
+}
+

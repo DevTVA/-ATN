@@ -15,7 +15,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     const promises = [
-      api.get('/orders?status=&limit=5'),
+      api.get('/orders?status=paid,cancelled&limit=5'),
       api.get('/tables'),
     ];
     
@@ -42,10 +42,10 @@ export default function Dashboard() {
   const occupied = tables.filter(t => t.status === 'occupied').length
   const todayRevenue = revenue?.summary?.totalRevenue || 0
 
-  const chartData = (revenue?.labels || []).slice(0, 15).map((label, i) => {
-    const found = revenue.chartData.find(d => parseInt(d._id) === i + 1)
-    return { label, value: found?.revenue || 0 }
-  })
+  const chartData = (revenue?.chartData || []).slice(0, 15).map(d => ({
+    label: d.label,
+    value: d.revenue || 0
+  }))
 
   return (
     <div>

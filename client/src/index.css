@@ -77,3 +77,15 @@
     pointer-events: auto !important;
   }
 }
+
+
+
+@keyframes qr-scan {
+  0% { top: 0%; }
+  50% { top: 98%; }
+  100% { top: 0%; }
+}
+.animate-qr-scan {
+  animation: qr-scan 3s ease-in-out infinite;
+}
+

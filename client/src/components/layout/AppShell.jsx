@@ -6,8 +6,8 @@ const navItems = [
   { to: '/dashboard', icon: 'ti-layout-dashboard', label: 'Dashboard', adminOnly: true },
   { to: '/pos', icon: 'ti-device-desktop', label: 'Bán hàng (POS)' },
   { to: '/products', icon: 'ti-coffee', label: 'Sản phẩm', adminOnly: true },
-  { to: '/orders', icon: 'ti-receipt', label: 'Đơn hàng', adminOnly: true },
-  { to: '/tables', icon: 'ti-armchair', label: 'Bàn', adminOnly: true },
+  { to: '/orders', icon: 'ti-receipt', label: 'Đơn hàng' },
+  { to: '/tables', icon: 'ti-armchair', label: 'Bàn' },
   { to: '/users', icon: 'ti-users', label: 'Nhân viên', adminOnly: true },
   { to: '/revenue', icon: 'ti-chart-bar', label: 'Báo cáo thống kê', adminOnly: true },
 ]

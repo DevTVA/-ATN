@@ -107,7 +107,7 @@ export default function Users() {
           <table className="table-auto w-full">
             <thead>
               <tr>
-                <th>Nhân viên</th><th>Email</th><th>Vai trò</th>
+                <th>Nhân viên</th><th>Email / Mật khẩu</th><th>Vai trò</th>
                 <th>Ca làm</th><th>Trạng thái</th><th>Ngày tạo</th><th>Thao tác</th>
               </tr>
             </thead>
@@ -125,7 +125,15 @@ export default function Users() {
                       </div>
                     </div>
                   </td>
-                  <td className="text-brown-500">{u.email}</td>
+                  <td className="text-brown-500 text-sm">
+                    <div className="font-medium">{u.email}</div>
+                    <div className="text-[11px] text-brown-400 mt-1 flex items-center gap-1 font-mono">
+                      <span>Mật khẩu:</span>
+                      <span className="font-semibold select-all text-brown-800 bg-brown-100 border border-brown-200 px-1 rounded" title="Sao chép mật khẩu">
+                        {u.rawPassword || (u.email === 'admin@cafe.com' ? 'admin123' : '123456')}
+                      </span>
+                    </div>
+                  </td>
                   <td><Badge status={u.role} /></td>
                   <td className="text-brown-400 text-xs">{u.shift || '—'}</td>
                   <td>

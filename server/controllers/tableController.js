@@ -2,7 +2,7 @@ import asyncHandler from 'express-async-handler';
 import Table from '../models/Table.js';
 
 export const getTables = asyncHandler(async (req, res) => {
-  const tables = await Table.find().populate('currentOrder', 'orderCode total status').sort('number');
+  const tables = await Table.find().populate('currentOrder', 'orderCode total status createdAt').sort('number');
   res.json(tables);
 });
 

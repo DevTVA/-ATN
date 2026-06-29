@@ -6,8 +6,8 @@ const router = express.Router();
 
 router.get('/', protect, c.getTables);
 router.get('/:id', protect, c.getTable);
-router.post('/', protect, adminOnly, c.createTable);
+router.post('/', protect, c.createTable);
 router.put('/:id', protect, c.updateTable);
-router.delete('/:id', protect, adminOnly, c.deleteTable);
+router.delete('/:id', protect, c.deleteTable);
 
 export default router;

@@ -10,6 +10,8 @@ router.post('/', protect, c.createOrder);
 router.put('/:id', protect, c.updateOrder);
 router.put('/:id/change-table', protect, c.changeTable);
 router.put('/:id/merge-table', protect, c.mergeTable);
-router.delete('/:id', protect, adminOnly, c.deleteOrder);
+router.delete('/:id', protect, c.deleteOrder);
+router.post('/:id/webhook-mock', protect, c.mockWebhook);
+router.post('/webhook-sepay', c.webhookSepay);
 
 export default router;

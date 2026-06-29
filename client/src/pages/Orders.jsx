@@ -1,11 +1,11 @@
 import React, { useEffect, useState } from 'react'
 import api from '../api/axios'
 import toast from 'react-hot-toast'
-import { formatVND, formatDateTime, STATUS_LABEL } from '../utils/format'
+import { formatVND, formatDateTime, STATUS_LABEL, PAYMENT_METHOD_LABEL } from '../utils/format'
 import { Modal, Badge, Spinner, EmptyState, PageHeader, StatPill } from '../components/ui'
 
-const STATUSES = ['', 'pending', 'processing', 'paid', 'cancelled']
-const STATUS_COLORS = { pending: 'text-blue-600', processing: 'text-amber-600', paid: 'text-green-600', cancelled: 'text-red-600' }
+const STATUSES = ['', 'paid', 'cancelled']
+const STATUS_COLORS = { paid: 'text-green-600', cancelled: 'text-red-600' }
 
 export default function Orders() {
   const [orders, setOrders] = useState([])
@@ -18,7 +18,8 @@ export default function Orders() {
   const fetch = async () => {
     setLoading(true)
     try {
-      const { data } = await api.get(`/orders?status=${status}`)
+      const qStatus = status || 'paid,cancelled'
+      const { data } = await api.get(`/orders?status=${qStatus}`)
       setOrders(data)
     } finally { setLoading(false) }
   }
@@ -45,8 +46,6 @@ export default function Orders() {
   const counts = {
     all: orders.length,
     paid: orders.filter(o => o.status === 'paid').length,
-    processing: orders.filter(o => o.status === 'processing').length,
-    pending: orders.filter(o => o.status === 'pending').length,
     cancelled: orders.filter(o => o.status === 'cancelled').length,
   }
 
@@ -66,8 +65,6 @@ export default function Orders() {
       <div className="flex flex-wrap gap-2 mb-4">
         <StatPill label="Tổng" value={counts.all} />
         <StatPill label="Đã thanh toán" value={counts.paid} color="text-green-700" />
-        <StatPill label="Đang pha chế" value={counts.processing} color="text-amber-700" />
-        <StatPill label="Chờ xác nhận" value={counts.pending} color="text-blue-700" />
         <StatPill label="Đã huỷ" value={counts.cancelled} color="text-red-700" />
       </div>
 
@@ -116,11 +113,6 @@ export default function Orders() {
                       <button className="btn btn-sm px-2" onClick={() => openDetail(o)} title="Xem chi tiết">
                         <i className="ti ti-eye text-sm" />
                       </button>
-                      {o.status === 'pending' && (
-                        <button className="btn btn-sm px-2 bg-amber-50 text-amber-700 border-amber-200" onClick={() => updateStatus(o._id, 'processing')} title="Bắt đầu pha chế">
-                          <i className="ti ti-player-play text-sm" />
-                        </button>
-                      )}
                       {o.status === 'processing' && (
                         <button className="btn btn-sm px-2 bg-green-50 text-green-700 border-green-200" onClick={() => updateStatus(o._id, 'paid')} title="Thanh toán">
                           <i className="ti ti-check text-sm" />
@@ -142,17 +134,12 @@ export default function Orders() {
         title={`Chi tiết đơn ${detail?.orderCode}`}
         footer={
           <div className="flex gap-2 w-full">
-            {detail?.status === 'pending' && (
-              <button className="btn bg-amber-50 text-amber-700 border-amber-200" onClick={() => updateStatus(detail._id, 'processing')}>
-                <i className="ti ti-player-play" /> Bắt đầu pha chế
-              </button>
-            )}
             {detail?.status === 'processing' && (
               <button className="btn bg-green-50 text-green-700 border-green-200" onClick={() => { updateStatus(detail._id, 'paid'); setDetail(null) }}>
                 <i className="ti ti-check" /> Thanh toán
               </button>
             )}
-            {(detail?.status === 'pending' || detail?.status === 'processing') && (
+            {(detail?.status === 'processing') && (
               <button className="btn btn-danger" onClick={() => { updateStatus(detail._id, 'cancelled'); setDetail(null) }}>
                 <i className="ti ti-x" /> Huỷ đơn
               </button>
@@ -167,7 +154,7 @@ export default function Orders() {
               <div><span className="text-brown-400">Nhân viên:</span> <span className="font-medium">{detailData.staffName || detailData.staff?.name}</span></div>
               <div><span className="text-brown-400">Bàn:</span> <span className="font-medium">{detailData.type === 'takeaway' || !detailData.tableNumber ? 'Mang về' : `Bàn ${detailData.tableNumber}`}</span></div>
               <div><span className="text-brown-400">Trạng thái:</span> <Badge status={detailData.status} /></div>
-              <div><span className="text-brown-400">Thanh toán:</span> <span className="font-medium capitalize">{detailData.paymentMethod || 'cash'}</span></div>
+              <div><span className="text-brown-400">Thanh toán:</span> <span className="font-medium">{PAYMENT_METHOD_LABEL[detailData.payment?.paymentMethod] || PAYMENT_METHOD_LABEL[detailData.paymentMethod] || 'Tiền mặt'}</span></div>
             </div>
 
             <div>
@@ -270,7 +257,7 @@ function CreateOrderModal({ open, onClose, onCreated }) {
             <label className="label">Bàn *</label>
             <select className="select" value={form.tableId} onChange={e => setForm(f => ({ ...f, tableId: e.target.value }))}>
               <option value="">-- Chọn bàn --</option>
-              {tables.map(t => <option key={t._id} value={t._id}>Bàn {t.number} ({t.capacity} người)</option>)}
+              {tables.map(t => <option key={t._id} value={t._id}>Bàn {t.number}</option>)}
             </select>
           </div>
           <div>
