@@ -29,7 +29,7 @@ export default function Login() {
         {/* Logo */}
         <div className="text-center mb-8">
           <div className="text-6xl mb-3">☕</div>
-          <h1 className="text-3xl font-serif text-brown-100">Brew & Co.</h1>
+          <h1 className="text-3xl font-serif text-brown-100">Tí</h1>
           <p className="text-brown-500 text-sm mt-1">Hệ thống quản lý quán cà phê</p>
         </div>
 

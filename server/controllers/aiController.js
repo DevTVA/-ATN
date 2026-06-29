@@ -170,7 +170,7 @@ export const chatWithAI = asyncHandler(async (req, res) => {
   // Fallback nếu không cấu hình GEMINI_API_KEY
   if (!apiKey || apiKey === 'your_actual_api_key_here') {
     return res.json({
-      reply: `🤖 **Brew & Co. AI Chatbot (Chế độ Demo)**\n\nHệ thống phát hiện thấy bạn chưa cấu hình khóa API trong file \`server/.env\`.\n\n### Hướng dẫn cấu hình hoạt động:\n1. Truy cập [Google AI Studio](https://aistudio.google.com/) để nhận mã khóa API miễn phí.\n2. Mở file \`server/.env\` và thêm dòng:\n   \`\`\`env\n   GEMINI_API_KEY=mã_khóa_api_của_bạn\n   \`\`\`\n3. Khởi động lại server để bắt đầu trải nghiệm AI chatbot thông minh phân tích dữ liệu thực tế.\n\n---\n*Dưới đây là một số câu trả lời mẫu dựa trên câu hỏi của bạn:*\n* Bạn hỏi: "${message}"\n* Để kiểm tra trạng thái bàn hiện tại, bạn có thể chuyển qua tab **Sơ đồ bàn**.\n* Để xem chi tiết doanh thu thực tế, vui lòng truy cập trang **Báo cáo doanh thu**.`
+      reply: `🤖 **Tí AI Chatbot (Chế độ Demo)**\n\nHệ thống phát hiện thấy bạn chưa cấu hình khóa API trong file \`server/.env\`.\n\n### Hướng dẫn cấu hình hoạt động:\n1. Truy cập [Google AI Studio](https://aistudio.google.com/) để nhận mã khóa API miễn phí.\n2. Mở file \`server/.env\` và thêm dòng:\n   \`\`\`env\n   GEMINI_API_KEY=mã_khóa_api_của_bạn\n   \`\`\`\n3. Khởi động lại server để bắt đầu trải nghiệm AI chatbot thông minh phân tích dữ liệu thực tế.\n\n---\n*Dưới đây là một số câu trả lời mẫu dựa trên câu hỏi của bạn:*\n* Bạn hỏi: "${message}"\n* Để kiểm tra trạng thái bàn hiện tại, bạn có thể chuyển qua tab **Sơ đồ bàn**.\n* Để xem chi tiết doanh thu thực tế, vui lòng truy cập trang **Báo cáo doanh thu**.`
     });
   }
 
@@ -188,7 +188,7 @@ export const chatWithAI = asyncHandler(async (req, res) => {
           getRecentOrdersDeclaration
         ]
       }],
-      systemInstruction: `Bạn là một AI Trợ lý Báo cáo Thông minh tại quán cafe Brew & Co. (địa chỉ Liên Minh, Đan Phượng, Hà Nội - SĐT: 0963664924).
+      systemInstruction: `Bạn là một AI Trợ lý Báo cáo Thông minh tại quán cafe Tí (địa chỉ Liên Minh, Đan Phượng, Hà Nội - SĐT: 0963664924).
 Nhiệm vụ của bạn là hỗ trợ chủ quán và nhân viên tra cứu, phân tích số liệu doanh thu, bán hàng, trạng thái bàn.
 Hãy trả lời bằng tiếng Việt thân thiện, chuyên nghiệp, lịch sự.
 Sử dụng các định dạng danh sách hoặc bảng biểu markdown để hiển thị các số liệu thống kê cho sạch sẽ, trực quan, dễ theo dõi.

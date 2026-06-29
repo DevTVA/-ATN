@@ -1426,7 +1426,7 @@ export default function POS() {
         {receiptData && (
           <div className="w-[80mm] mx-auto text-black font-sans text-[12px] leading-tight p-4">
             <div className="text-center mb-4">
-              <h1 className="text-xl font-bold font-serif mb-1">Brew & Co.</h1>
+              <h1 className="text-xl font-bold font-serif mb-1">Tí</h1>
               <p className="text-[10px]">Liên Minh, Đan Phượng Hà Nội</p>
               <p className="text-[10px]">ĐT: 0963664924</p>
               <h2 className="text-lg font-bold mt-3 uppercase border-b border-dashed border-black pb-2">Hóa Đơn Thanh Toán</h2>

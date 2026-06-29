@@ -29,7 +29,7 @@ export default function AppShell({ children }) {
         <div className="p-4 border-b border-brown-700 flex items-center gap-3">
           <div className="w-9 h-9 bg-brown-700 rounded-lg flex items-center justify-center text-xl">☕</div>
           <div>
-            <div className="text-brown-100 font-serif text-[15px]">Brew & Co.</div>
+            <div className="text-brown-100 font-serif text-[15px]">Tí</div>
             <div className="text-brown-500 text-[10px] tracking-wide">Quản lý quán</div>
           </div>
         </div>

@@ -1,4 +1,4 @@
-# ☕ Brew & Co. — Hệ thống quản lý quán cà phê
+# ☕ Tí — Hệ thống quản lý quán cà phê
 
 Ứng dụng web fullstack quản lý quán cà phê sử dụng MERN Stack (MongoDB, Express, React, Node.js).
 
