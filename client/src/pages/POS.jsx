@@ -270,7 +270,7 @@ export default function POS() {
     setReceiptData(null)
     setIsEditingOrder(false)
     
-    if (t.status === 'occupied' && t.currentOrder) {
+    if ((t.status === 'occupied' || t.status === 'reserved') && t.currentOrder) {
       setItems([])
       setNote('')
       setDiscountType('percent')
@@ -687,9 +687,10 @@ export default function POS() {
       const matchesOrderCode = t.currentOrder?.orderCode && t.currentOrder.orderCode.toLowerCase().includes(query)
       if (!matchesNumber && !matchesName && !matchesOrderCode) return false
     }
-    // Lọc theo bộ lọc status bàn (Trống / Đang dùng) thông qua leftTab
+    // Lọc theo bộ lọc status bàn (Trống / Đang dùng / Đặt trước) thông qua leftTab
     if (leftTab === 'empty' && t.status !== 'empty') return false
     if (leftTab === 'occupied' && t.status !== 'occupied') return false
+    if (leftTab === 'reserved' && t.status !== 'reserved') return false
     return true
   })
 
@@ -735,6 +736,12 @@ export default function POS() {
                   className={`pb-1 text-xs font-bold border-b-2 transition-all ${leftTab === 'occupied' ? 'border-sky-600 text-sky-600' : 'border-transparent text-brown-500 hover:text-brown-900'}`}
                 >
                   Bàn đang phục vụ ({tables.filter(t => t.status === 'occupied').length})
+                </button>
+                <button
+                  onClick={() => setLeftTab('reserved')}
+                  className={`pb-1 text-xs font-bold border-b-2 transition-all ${leftTab === 'reserved' ? 'border-sky-600 text-sky-600' : 'border-transparent text-brown-500 hover:text-brown-900'}`}
+                >
+                  Đã đặt ({tables.filter(t => t.status === 'reserved').length})
                 </button>
               </div>
             </div>
@@ -799,12 +806,12 @@ export default function POS() {
                 )
               })}
 
-              {/* 2. Render các bàn phục vụ (nếu tab là 'all' hoặc 'empty' hoặc 'occupied') */}
-              {(leftTab === 'all' || leftTab === 'empty' || leftTab === 'occupied') && filteredTables.map(t => {
-                const isOccupied = t.status === 'occupied'
+              {/* 2. Render các bàn phục vụ (nếu tab là 'all' hoặc 'empty' hoặc 'occupied' hoặc 'reserved') */}
+              {(leftTab === 'all' || leftTab === 'empty' || leftTab === 'occupied' || leftTab === 'reserved') && filteredTables.map(t => {
+                const status = t.status
                 const isActiveSelected = selectedTable?._id === t._id && selectedTable?._id !== 'takeaway'
 
-                if (!isOccupied) {
+                if (status === 'empty') {
                   return (
                     <div
                       key={t._id}
@@ -820,6 +827,54 @@ export default function POS() {
                       </div>
                       <div className="text-xs font-bold text-brown-850">Bàn {t.number}</div>
                       <div className="text-[10px] text-green-600 font-bold uppercase mt-1">Còn trống</div>
+                    </div>
+                  )
+                } else if (status === 'reserved') {
+                  let timeDisplay = ''
+                  if (t.currentOrder && t.currentOrder.createdAt) {
+                    const minutesElapsed = Math.round((new Date() - new Date(t.currentOrder.createdAt)) / 60000)
+                    if (minutesElapsed < 60) {
+                      timeDisplay = `${minutesElapsed}'`
+                    } else {
+                      const hours = Math.floor(minutesElapsed / 60)
+                      const mins = minutesElapsed % 60
+                      timeDisplay = `${hours}h ${mins}'`
+                    }
+                  }
+
+                  return (
+                    <div
+                      key={t._id}
+                      onClick={() => handleSelectTable(t)}
+                      className={`rounded-2xl border-2 p-3 cursor-pointer transition-all hover:shadow-md flex flex-col min-h-[145px] justify-between relative ${
+                        isActiveSelected
+                          ? 'border-sky-500 bg-sky-50/20 ring-2 ring-sky-300 ring-opacity-30 shadow-sm'
+                          : 'bg-amber-50/20 border-amber-200 hover:border-amber-400'
+                      }`}
+                    >
+                      {/* Top info row */}
+                      <div className="flex justify-between items-start w-full mb-1">
+                        <div className="w-5 h-5 rounded-full bg-amber-500 text-white text-[10px] font-bold flex items-center justify-center">
+                          {t.number}
+                        </div>
+                        <div className="text-right">
+                          <span className="text-[8px] font-bold text-amber-600 block uppercase tracking-wide">Đặt trước</span>
+                          {timeDisplay && <span className="text-[10px] font-extrabold text-amber-600 block">{timeDisplay}</span>}
+                        </div>
+                      </div>
+
+                      {/* Middle info */}
+                      <div className="text-center my-2">
+                        <div className="text-xs font-extrabold text-brown-900">Bàn {t.number}</div>
+                      </div>
+
+                      {/* Bottom price */}
+                      <div className="text-center border-t border-brown-50 pt-2 mt-auto">
+                        <span className="text-[9px] text-brown-400 block uppercase font-medium">Tổng cộng</span>
+                        <span className="text-xs font-extrabold text-brown-900 block">
+                          {t.currentOrder?.total ? formatVND(t.currentOrder.total) : '—'}
+                        </span>
+                      </div>
                     </div>
                   )
                 } else {
